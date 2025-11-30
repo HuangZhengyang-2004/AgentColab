@@ -1,0 +1,122 @@
+# AgentColab 配置文件示例
+# 复制此文件为 config.yaml 并填入你的API密钥
+
+# ===================================================================
+# API密钥配置（可选，优先级低于环境变量）
+# 建议使用环境变量配置，这里仅作备选
+# ===================================================================
+api_keys:
+  mineru_api_key: "YOUR_MINERU_API_KEY_HERE"
+  deepseek_api_key: "YOUR_DEEPSEEK_API_KEY_HERE"
+  gemini_api_key: "YOUR_GEMINI_API_KEY_HERE"
+  claude_api_key: "YOUR_CLAUDE_API_KEY_HERE"
+
+# ===================================================================
+# API配置
+# ===================================================================
+api:
+  # MinerU API配置
+  mineru:
+    base_url: "https://mineru.ai/api/v1"
+    timeout: 300
+    model_version: "v2"
+    enable_formula: true
+    enable_table: true
+    language: "auto"
+
+  # DeepSeek API配置
+  deepseek:
+    base_url: "https://api.deepseek.com/v1"
+    model: "deepseek-chat"
+    max_tokens: 4096
+    temperature: 0.7
+
+  # Google Gemini API配置
+  gemini:
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+    model: "gemini-pro"
+    max_tokens: 4096
+    temperature: 0.7
+
+  # Claude API配置
+  claude:
+    base_url: "https://api.anthropic.com/v1"
+    model: "claude-3-sonnet-20240229"
+    max_tokens: 4096
+    temperature: 0.7
+
+# ===================================================================
+# 目录配置
+# ===================================================================
+directories:
+  data_root: "data"
+  input: "data/input"
+  extracted: "data/extracted"
+  cleaned: "data/cleaned"
+  analyzed: "data/analyzed"
+  ideas: "data/ideas"
+  code: "data/code"
+  logs: "logs"
+
+# ===================================================================
+# 日志配置
+# ===================================================================
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  file_prefix: "agentcolab"
+
+# ===================================================================
+# 流程参数配置
+# ===================================================================
+pipeline:
+  # PDF提取配置
+  pdf_extraction:
+    use_mineru: true  # 是否使用MinerU（需要API key）
+    fallback_to_pypdf2: true  # MinerU失败时是否回退到PyPDF2
+    mineru_model: "v2"
+    max_wait_time: 600  # 最大等待时间（秒）
+    poll_interval: 5  # 轮询间隔（秒）
+
+  # 论文清洗配置
+  paper_cleaning:
+    model: "deepseek"
+    remove_references: true
+    remove_acknowledgments: true
+    keep_formulas: true
+    keep_tables: true
+
+  # 论文分析配置
+  paper_analysis:
+    model: "gemini"
+    extract_methods: true
+    extract_results: true
+    extract_contributions: true
+
+  # 想法生成配置
+  idea_generation:
+    model: "gemini"
+    num_ideas: 5
+    creativity_level: 0.8
+
+  # 想法筛选配置
+  idea_selection:
+    model: "gemini"
+    selection_criteria: ["novelty", "feasibility", "impact"]
+    top_k: 3
+
+  # 想法细化配置
+  idea_detailing:
+    model: "gemini"
+    include_methodology: true
+    include_experiments: true
+    include_timeline: true
+
+  # 代码生成配置
+  code_generation:
+    model: "claude"
+    language: "python"
+    include_tests: true
+    include_documentation: true
+

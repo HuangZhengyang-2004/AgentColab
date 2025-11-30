@@ -35,7 +35,6 @@ env/
 
 # API Keys and Secrets
 .env
-config.yaml
 *.key
 *.pem
 
@@ -43,13 +42,19 @@ config.yaml
 logs/
 *.log
 
-# Data files (optional, uncomment if needed)
-# data/input/*
-# data/extracted/*
-# data/cleaned/*
-# data/analyzed/*
-# data/ideas/*
-# data/code/*
+# Data files - 所有数据文件都不提交
+data/
+data/input/*
+data/extracted/*
+data/cleaned/*
+data/analyzed/*
+data/ideas/*
+data/code/*
+
+# 测试产生的文件
+test_mineru/
+*_mineru/
+result.zip
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -66,3 +71,9 @@ results/
 output/
 temp/
 tmp/
+
+# 配置文件（包含密钥）
+config.yaml
+
+# 保留配置示例（不含密钥）
+!config.example.yaml
