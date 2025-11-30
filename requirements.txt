@@ -1,2 +1,27 @@
+# AgentColab项目依赖包
+
+# Google Gemini API
 google-generativeai>=0.3.0
 
+# Anthropic Claude API
+anthropic>=0.40.0
+
+# OpenAI SDK (用于DeepSeek API)
+openai>=1.0.0
+
+# PDF处理
+PyPDF2>=3.0.0
+
+# 配置文件解析
+pyyaml>=6.0.0
+
+# Web UI
+gradio>=4.0.0
+
+# 数据处理
+numpy>=1.24.0
+scipy>=1.10.0
+
+# 其他工具
+python-dotenv>=1.0.0
+requests>=2.31.0

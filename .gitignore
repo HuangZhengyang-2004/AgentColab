@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# API Keys and Secrets
+.env
+config.yaml
+*.key
+*.pem
+
+# Logs
+logs/
+*.log
+
+# Data files (optional, uncomment if needed)
+# data/input/*
+# data/extracted/*
+# data/cleaned/*
+# data/analyzed/*
+# data/ideas/*
+# data/code/*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+
+# mypy
+.mypy_cache/
+
+# Results
+results/
+output/
+temp/
+tmp/
