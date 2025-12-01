@@ -20,6 +20,7 @@ from agents import (
 )
 from utils.config_loader import config_loader
 from utils.logger import logger
+from utils.collection_ui import load_collection_info, view_paper_content, export_collection_summary
 
 
 # ==================== 配置管理 ====================
@@ -625,6 +626,123 @@ def create_ui():
                     fn=batch_extract_pdfs_url,
                     inputs=[batch_urls, use_mineru_pdf],
                     outputs=batch_url_output
+                )
+        
+        # ==================== Tab 2.5: 论文集合管理 ====================
+        with gr.Tab("📚 论文集合"):
+            gr.Markdown("## 论文集合管理")
+            gr.Markdown("""
+            管理提取的论文，将多篇论文组织成统一格式（paper_1, paper_2, ...）
+            """)
+            
+            with gr.Tab("📊 查看集合"):
+                gr.Markdown("### 查看已提取的论文集合")
+                
+                with gr.Row():
+                    collection_path = gr.Textbox(
+                        label="集合文件路径",
+                        placeholder="data/collections/all_papers.json",
+                        value="data/collections/all_papers.json"
+                    )
+                    load_collection_btn = gr.Button("📂 加载集合", variant="secondary")
+                
+                collection_info = gr.Textbox(label="集合信息", lines=15)
+                
+                gr.Markdown("### 查看特定论文")
+                with gr.Row():
+                    paper_key = gr.Textbox(
+                        label="论文键名",
+                        placeholder="paper_1",
+                        value="paper_1"
+                    )
+                    view_paper_btn = gr.Button("👁️ 查看内容", variant="secondary")
+                
+                paper_content = gr.Textbox(label="论文内容", lines=15)
+                
+                # 绑定事件
+                load_collection_btn.click(
+                    fn=lambda path: load_collection_info(path),
+                    inputs=[collection_path],
+                    outputs=[collection_info]
+                )
+                
+                view_paper_btn.click(
+                    fn=lambda path, key: view_paper_content(path, key),
+                    inputs=[collection_path, paper_key],
+                    outputs=[paper_content]
+                )
+            
+            with gr.Tab("🔄 创建集合"):
+                gr.Markdown("### 从extracted目录创建论文集合")
+                gr.Markdown("""
+                自动加载 `data/extracted/` 目录下所有已提取的论文，
+                创建统一格式的集合文件。
+                """)
+                
+                create_collection_btn = gr.Button("📦 创建集合", variant="primary", size="lg")
+                create_output = gr.Textbox(label="创建结果", lines=10)
+                
+                def create_collection_from_extracted():
+                    try:
+                        from utils.paper_collection import PaperCollection
+                        
+                        # 从extracted目录加载
+                        collection = PaperCollection.from_extracted_dir("data/extracted")
+                        
+                        if len(collection) == 0:
+                            return "❌ data/extracted/ 目录中没有找到论文"
+                        
+                        # 保存集合
+                        output_path = "data/collections/all_papers.json"
+                        collection.save_to_json(output_path)
+                        
+                        # 生成报告
+                        summary = collection.get_summary()
+                        report = f"✓ 成功创建论文集合！\n\n"
+                        report += f"📊 统计信息:\n"
+                        report += f"  • 总论文数: {summary['total_papers']}\n"
+                        report += f"  • 总字符数: {summary['total_characters']:,}\n"
+                        report += f"  • 保存位置: {output_path}\n\n"
+                        report += f"📚 论文列表:\n"
+                        
+                        for p in summary['papers']:
+                            name = p['name'][:50] + "..." if len(p['name']) > 50 else p['name']
+                            report += f"  {p['key']}: {name}\n"
+                            report += f"          ({p['length']:,} 字符)\n"
+                        
+                        return report
+                        
+                    except Exception as e:
+                        return f"❌ 创建失败: {str(e)}"
+                
+                create_collection_btn.click(
+                    fn=create_collection_from_extracted,
+                    outputs=[create_output]
+                )
+            
+            with gr.Tab("💾 导出摘要"):
+                gr.Markdown("### 导出集合摘要为文本文件")
+                
+                export_path = gr.Textbox(
+                    label="集合文件路径",
+                    placeholder="data/collections/all_papers.json",
+                    value="data/collections/all_papers.json"
+                )
+                export_btn = gr.Button("💾 导出摘要", variant="primary")
+                export_output = gr.Textbox(label="导出结果", lines=15)
+                
+                def export_summary(path):
+                    try:
+                        from utils.collection_ui import export_collection_summary
+                        result, _ = export_collection_summary(path)
+                        return result
+                    except Exception as e:
+                        return f"❌ 导出失败: {str(e)}"
+                
+                export_btn.click(
+                    fn=export_summary,
+                    inputs=[export_path],
+                    outputs=[export_output]
                 )
         
         # ==================== Tab 3: 论文处理 ====================
