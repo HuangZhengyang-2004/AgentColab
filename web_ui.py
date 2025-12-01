@@ -281,10 +281,43 @@ def clean_papers(progress=gr.Progress()):
         
         progress(1.0, desc="清洗完成！")
         
-        return f"✅ 清洗完成！共处理 {len(results)} 篇论文"
+        if not results:
+            return "❌ 没有找到需要清洗的论文\n请先在'论文集合'Tab中创建集合"
+        
+        # 生成报告
+        report = f"✅ 清洗完成！共处理 {len(results)} 篇论文\n\n"
+        report += "清洗统计:\n"
+        report += "=" * 60 + "\n\n"
+        
+        # 加载原始集合对比
+        from utils import PaperCollection
+        try:
+            original_collection = PaperCollection.load_from_json("data/collections/all_papers.json")
+            original_papers = original_collection.get_all_contents()
+            
+            for paper_key in results.keys():
+                original_len = len(original_papers.get(paper_key, ""))
+                cleaned_len = len(results[paper_key])
+                removal_rate = (1 - cleaned_len/original_len)*100 if original_len > 0 else 0
+                
+                report += f"{paper_key}:\n"
+                report += f"  原始: {original_len:,} 字符\n"
+                report += f"  清洗: {cleaned_len:,} 字符\n"
+                report += f"  删除: {removal_rate:.1f}%\n\n"
+        except:
+            for paper_key, content in results.items():
+                report += f"  • {paper_key}: {len(content):,} 字符\n"
+        
+        report += "\n" + "=" * 60 + "\n"
+        report += "保存位置:\n"
+        report += "  • 文本文件: data/cleaned/paper_*_cleaned.txt\n"
+        report += "  • 集合文件: data/collections/all_papers_cleaned.json\n"
+        
+        return report
         
     except Exception as e:
-        return f"❌ 清洗失败: {str(e)}"
+        import traceback
+        return f"❌ 清洗失败: {str(e)}\n\n{traceback.format_exc()}"
 
 
 # ==================== 论文分析 ====================
