@@ -162,141 +162,493 @@ api_keys:
 
 **优点**：完全可定制，集成到其他项目
 
+#### 示例1：使用MinerU提取PDF
+
+```python
+from agents import PDFExtractorAgent
+
+# 初始化Agent（使用MinerU）
+agent = PDFExtractorAgent(use_mineru=True)
+
+# 方式A：从URL提取
+content = agent.extract_from_url(
+    pdf_url="https://arxiv.org/pdf/2301.00001.pdf",
+    pdf_name="example_paper"
+)
+
+# 结果：
+# - data/extracted/example_paper_extracted.txt（纯文本）
+# - data/extracted/example_paper_mineru/（完整结果）
+#   - extracted/full.md（Markdown含公式表格）
+#   - extracted/layout.json（布局信息）
+#   - extracted/{uuid}_content_list.json（内容列表）
+#   - extracted/{uuid}_model.json（模型信息）
+#   - extracted/images/（所有图片）
+
+print(f"提取的文本长度: {len(content)} 字符")
+
+# 方式B：上传本地文件
+content = agent.extract_from_file(
+    pdf_path="path/to/local/paper.pdf",
+    pdf_name="local_paper"
+)
+
+# 方式C：批量处理URL
+urls = [
+    "https://example.com/paper1.pdf",
+    "https://example.com/paper2.pdf"
+]
+results = agent.extract_from_urls(
+    pdf_urls=urls,
+    pdf_names=["paper1", "paper2"]
+)
+# 返回: {"paper1": "文本内容...", "paper2": "文本内容..."}
+
+# 方式D：批量上传本地文件
+files = ["paper1.pdf", "paper2.pdf", "paper3.pdf"]
+results = agent.batch_extract_from_files(files)
+```
+
+#### 示例2：使用PyPDF2提取本地PDF
+
+```python
+from agents import PDFExtractorAgent
+
+# 初始化Agent（使用PyPDF2）
+agent = PDFExtractorAgent(use_mineru=False)
+
+# 自动处理data/input/目录下的所有PDF
+results = agent.run()
+
+# 结果：
+# - data/extracted/{论文名}_extracted.txt（每个PDF一个文件）
+
+for name, content in results.items():
+    print(f"{name}: {len(content)} 字符")
+```
+
+#### 示例3：完整流程
+
+```python
+from main import AgentColab
+
+# 创建实例
+agentcolab = AgentColab()
+
+# 运行完整流程
+results = agentcolab.run_full_pipeline()
+# 依次执行：PDF提取 → 清洗 → 分析 → 想法生成 → 代码生成
+
+# 或单步执行
+agentcolab.run_module('pdf_extract')    # 只提取PDF
+agentcolab.run_module('paper_analyze')  # 只分析论文
+```
+
+#### 示例4：自定义工作流
+
 ```python
 from agents import PDFExtractorAgent, PaperAnalyzerAgent
 
-# 使用MinerU提取PDF
-agent = PDFExtractorAgent(use_mineru=True)
-content = agent.extract_from_url("https://example.com/paper.pdf")
+# 1. 提取PDF
+pdf_agent = PDFExtractorAgent(use_mineru=True)
+papers = pdf_agent.extract_from_urls(
+    pdf_urls=["https://example.com/paper1.pdf"],
+    pdf_names=["paper1"]
+)
 
-# 分析论文
+# 2. 自定义处理
+text = papers["paper1"]
+# 你的自定义逻辑...
+
+# 3. 分析论文
 analyzer = PaperAnalyzerAgent()
-results = analyzer.run()
+results = analyzer.run({"paper1": text})
 
-# 或使用主程序
-from main import AgentColab
-autopaper = AgentColab()
-results = autopaper.run_full_pipeline()
+# 4. 访问结果
+analysis = results["paper1"]
+print(analysis["summary"])
 ```
 
 ---
 
 ## ⚙️ 配置说明
 
-### API密钥配置
+### 配置文件：`config.yaml`
 
-**优先级**：环境变量 > 配置文件 > 空
+配置文件包含三大部分：API密钥、API参数、流程参数。
 
-配置文件位置：`config.yaml`
+#### 1. API密钥配置
+
+**优先级**：环境变量 > `config.yaml` > 空字符串
 
 ```yaml
-# API密钥配置
 api_keys:
-  google_api_key: ""      # Gemini API
-  deepseek_api_key: ""    # DeepSeek API
-  anthropic_api_key: ""   # Claude API
-  mineru_api_key: ""      # MinerU API（可选）
+  google_api_key: ""          # Gemini API密钥
+  deepseek_api_key: ""        # DeepSeek API密钥  
+  anthropic_api_key: ""       # Claude API密钥
+  mineru_api_key: ""          # MinerU API密钥（可选）
+```
 
-# API参数配置
+**推荐方式**：使用环境变量
+```bash
+export GOOGLE_API_KEY="your_key"
+export DEEPSEEK_API_KEY="your_key"
+export ANTHROPIC_API_KEY="your_key"
+export MINERU_API_KEY="your_key"
+```
+
+#### 2. API参数配置
+
+**Gemini配置**：
+```yaml
 api:
   gemini:
-    model: "gemini-2.5-flash"
-    temperature: 0.7
-    max_output_tokens: 8192
-  
+    model: "gemini-2.5-flash"        # 模型名称
+    temperature: 0.7                  # 随机性（0-1）
+    max_output_tokens: 8192           # 最大输出长度
+```
+
+**DeepSeek配置**：
+```yaml
+api:
   deepseek:
     base_url: "https://api.deepseek.com"
     model: "deepseek-chat"
     temperature: 0.7
-  
+```
+
+**Claude配置**：
+```yaml
+api:
   claude:
     model: "claude-3-5-sonnet-20241022"
     temperature: 0.7
-  
+    max_tokens: 4096
+```
+
+**MinerU配置**：
+```yaml
+api:
   mineru:
     base_url: "https://mineru.net/api/v4"
-    model_version: "vlm"
-    enable_formula: true
-    enable_table: true
+    timeout: 300                      # 请求超时（秒）
+    model_version: "vlm"              # vlm或pipeline
+    enable_formula: true              # 是否提取公式
+    enable_table: true                # 是否提取表格
+    language: "auto"                  # 语言识别
 ```
 
-### 流程控制配置
+#### 3. 流程参数配置
 
+**PDF提取配置**：
 ```yaml
 pipeline:
-  # PDF提取配置
   pdf_extraction:
-    use_mineru: false           # 是否使用MinerU
-    fallback_to_pypdf2: true    # 回退到PyPDF2
-    mineru_model: "vlm"         # VLM或Pipeline
-  
-  # 论文清洗配置
-  paper_cleaning:
-    enabled: true
-  
-  # 论文分析配置
-  paper_analysis:
-    do_translation: true        # 翻译
-    do_summary: true            # 总结
-  
-  # 想法生成配置
-  idea_generation:
-    min_ideas: 3
-    score_threshold: 60
+    use_mineru: false                 # 是否使用MinerU
+    fallback_to_pypdf2: true          # MinerU失败时回退到PyPDF2
+    mineru_model: "vlm"               # MinerU模型：vlm或pipeline
+    max_wait_time: 600                # 最大等待时间（秒）
+    poll_interval: 5                  # 状态检查间隔（秒）
 ```
+
+**论文清洗配置**（待实现）：
+```yaml
+pipeline:
+  paper_cleaning:
+    enabled: true                     # 是否启用清洗
+    remove_references: true           # 移除参考文献
+    remove_acknowledgments: true      # 移除致谢
+    keep_formulas: true               # 保留公式
+    keep_tables: true                 # 保留表格
+```
+
+**论文分析配置**（待实现）：
+```yaml
+pipeline:
+  paper_analysis:
+    do_translation: true              # 是否翻译为中文
+    do_formula_analysis: true         # 是否分析公式
+    do_summary: true                  # 是否生成总结
+    extract_methods: true             # 是否提取方法
+    extract_results: true             # 是否提取结果
+```
+
+**想法生成配置**（待实现）：
+```yaml
+pipeline:
+  idea_generation:
+    min_ideas: 3                      # 最少生成想法数
+    max_ideas: 10                     # 最多生成想法数
+    score_threshold: 60               # 最低分数阈值
+    creativity_level: 0.8             # 创造性水平（0-1）
+```
+
+#### 4. 目录配置
+
+```yaml
+directories:
+  data_root: "data"                   # 数据根目录
+  input: "data/input"                 # PDF输入目录
+  extracted: "data/extracted"         # 提取结果目录
+  cleaned: "data/cleaned"             # 清洗结果目录
+  analyzed: "data/analyzed"           # 分析结果目录
+  ideas: "data/ideas"                 # 想法目录
+  code: "data/code"                   # 代码目录
+  logs: "logs"                        # 日志目录
+```
+
+#### 5. 日志配置
+
+```yaml
+logging:
+  level: "INFO"                       # 日志级别
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  file_prefix: "agentcolab"           # 日志文件前缀
+```
+
+**日志级别说明**：
+- `DEBUG`：详细调试信息（开发时使用）
+- `INFO`：一般信息（推荐）
+- `WARNING`：警告信息
+- `ERROR`：错误信息
+- `CRITICAL`：严重错误
+
+**日志文件位置**：`logs/agentcolab_YYYYMMDD.log`
 
 ---
 
-## 📄 MinerU PDF解析
+## 📦 模块详细说明
 
-MinerU是推荐的PDF解析方案，提供高精度提取。
+### 1. PDF提取模块 (`PDFExtractorAgent`)
+
+**状态**：✅ 已完全实现
+
+#### 功能概述
+支持两种PDF提取方式：MinerU高精度提取和PyPDF2本地提取。
+
+#### MinerU方式
+
+**提取内容**：
+- 📝 文本内容（包括正文、标题、段落）
+- 🧮 数学公式（LaTeX格式）
+- 📊 表格（Markdown格式）
+- 🖼️ 图片（自动提取并保存）
+- 📐 布局信息（保持原文档结构）
+
+**支持的输入方式**：
+1. **URL方式**：提供PDF的公开URL
+2. **文件上传**：通过Web UI直接上传本地PDF文件
+
+**工作流程**：
+1. 上传PDF到MinerU服务器（文件上传模式）或提供URL
+2. 创建解析任务（自动选择VLM或Pipeline模型）
+3. 轮询任务状态（每5秒检查一次）
+4. 下载解析结果（ZIP格式）
+5. 自动解压并保存
+
+**生成的文件**：
+```
+data/extracted/
+├── 论文名_extracted.txt          # 纯文本内容
+└── 论文名_mineru/                 # MinerU完整结果
+    ├── extracted/
+    │   ├── full.md                # Markdown格式（含公式、表格）
+    │   ├── layout.json            # 页面布局信息
+    │   ├── {uuid}_content_list.json   # 内容列表
+    │   ├── {uuid}_model.json          # 模型识别信息
+    │   ├── {uuid}_origin.pdf          # 原始PDF（保留）
+    │   └── images/                # 提取的所有图片
+    │       ├── {hash1}.jpg        # 图片（hash命名）
+    │       ├── {hash2}.jpg
+    │       └── ...
+    └── result.zip                 # 原始ZIP文件（保留）
+```
+
+**配置参数**：
+```yaml
+pipeline:
+  pdf_extraction:
+    use_mineru: true              # 是否使用MinerU
+    fallback_to_pypdf2: true      # 失败时回退到PyPDF2
+    mineru_model: "vlm"           # vlm或pipeline
+    max_wait_time: 600            # 最大等待时间（秒）
+    poll_interval: 5              # 状态检查间隔（秒）
+```
+
+**使用示例**：
+```python
+from agents import PDFExtractorAgent
+
+# Web UI上传方式
+agent = PDFExtractorAgent(use_mineru=True)
+content = agent.extract_from_file("path/to/paper.pdf", "论文名称")
+
+# URL方式
+content = agent.extract_from_url(
+    pdf_url="https://example.com/paper.pdf",
+    pdf_name="论文名称"
+)
+
+# 批量处理
+files = ["paper1.pdf", "paper2.pdf"]
+results = agent.batch_extract_from_files(files)
+```
+
+#### PyPDF2方式
+
+**提取内容**：
+- 📝 纯文本内容（基础文本提取）
+- ⚠️ 不支持公式识别
+- ⚠️ 不支持表格结构
+- ⚠️ 不支持图片提取
+
+**工作流程**：
+1. 读取本地PDF文件（`data/input/`）
+2. 逐页提取文本
+3. 保存为纯文本文件
+
+**生成的文件**：
+```
+data/extracted/
+└── 论文名_extracted.txt          # 纯文本，无格式
+```
+
+**使用场景**：
+- ✅ 简单文本文档
+- ✅ 不需要公式和表格
+- ✅ 完全离线处理
+- ✅ 无API限额
+
+---
+
+### 2. 论文清洗模块 (`PaperCleanerAgent`)
+
+**状态**：🔧 框架已实现，待完善
+
+**计划功能**：
+- 移除参考文献
+- 移除致谢部分
+- 移除附录内容
+- 统一格式
+- 修正OCR错误
+
+**输入**：`data/extracted/` 中的提取文本
+**输出**：`data/cleaned/` 中的清洗文本
+
+---
+
+### 3. 论文分析模块 (`PaperAnalyzerAgent`)
+
+**状态**：🔧 框架已实现，待完善
+
+**计划功能**：
+- 翻译为中文
+- 提取核心算法
+- 分析公式推导
+- 总结创新点
+- 提取实验结果
+
+**输入**：`data/cleaned/` 中的清洗文本
+**输出**：`data/analyzed/` 中的分析结果（JSON格式）
+
+---
+
+### 4. 想法生成模块 (`IdeaGeneratorAgent`)
+
+**状态**：🔧 框架已实现，待完善
+
+**计划功能**：
+- 基于多篇论文生成创新想法
+- 自动评分（新颖性、可行性、影响力）
+- 生成多个候选想法
+
+**输入**：`data/analyzed/` 中的分析结果
+**输出**：`data/ideas/` 中的想法列表（JSON格式）
+
+---
+
+### 5. 想法筛选模块 (`IdeaSelectorAgent`)
+
+**状态**：🔧 框架已实现，待完善
+
+**计划功能**：
+- 根据评分筛选最优想法
+- 评估可行性
+- 生成详细评估报告
+
+---
+
+### 6. 想法详细化模块 (`IdeaDetailerAgent`)
+
+**状态**：🔧 框架已实现，待完善
+
+**计划功能**：
+- 将想法扩展为完整研究方案
+- 包含方法论、实验设计
+- 生成时间表
+
+---
+
+### 7. 代码生成模块 (`CodeGeneratorAgent`)
+
+**状态**：🔧 框架已实现，待完善
+
+**计划功能**：
+- 根据想法生成Python实现
+- 包含测试代码
+- 包含文档注释
+
+**输入**：`data/ideas/` 中的详细想法
+**输出**：`data/code/` 中的Python代码
+
+---
+
+## 📄 MinerU PDF解析详细说明
+
+### API集成实现
+
+**MinerU Client** (`utils/mineru_client.py`)
+
+实现了完整的MinerU API调用：
+
+1. **文件上传API**：
+   - `upload_file_and_extract()` - 单文件上传解析
+   - `batch_upload_files_and_extract()` - 批量文件上传
+   - 自动获取上传URL、执行PUT上传、创建解析任务
+
+2. **URL解析API**：
+   - `create_task()` - 创建单个URL解析任务
+   - `batch_create_tasks()` - 创建批量URL解析任务
+
+3. **任务管理**：
+   - `get_task_status()` - 查询任务状态
+   - `wait_for_task()` - 等待单个任务完成
+   - `wait_for_batch()` - 等待批量任务完成
+
+4. **结果处理**：
+   - `download_result()` - 下载并解压结果
+   - 自动保存Markdown、图片、JSON等
 
 ### 特点
 
 - ✅ 高精度公式识别（LaTeX格式）
-- ✅ 表格结构保持
-- ✅ 图片自动提取
-- ✅ 支持批量处理
+- ✅ 表格结构保持（Markdown表格）
+- ✅ 图片自动提取（JPG/PNG格式）
+- ✅ 支持批量处理（多文件并发）
+- ✅ 支持文件上传（通过Web UI）
+- ✅ 支持URL解析（公开链接）
 - ✅ 每天2000页免费额度
 
-### 使用方法
-
-**单个PDF（从URL）**：
-
-```python
-from agents import PDFExtractorAgent
-
-agent = PDFExtractorAgent(use_mineru=True)
-content = agent.extract_from_url(
-    pdf_url="https://example.com/paper.pdf",
-    pdf_name="my_paper",
-    model_version="vlm"  # 推荐VLM模型
-)
-```
-
-**批量处理**：
-
-```python
-pdf_urls = [
-    "https://example.com/paper1.pdf",
-    "https://example.com/paper2.pdf"
-]
-
-results = agent.extract_from_urls(
-    pdf_urls=pdf_urls,
-    pdf_names=["paper1", "paper2"]
-)
-```
-
-### 注意事项
-
-⚠️ **MinerU需要PDF的公开URL**，不支持本地文件直接上传
-
-**解决方案**：
-- 将PDF上传到云存储（阿里云OSS、腾讯云COS等）获取URL
-- 或使用PyPDF2处理本地文件：`PDFExtractorAgent(use_mineru=False)`
-
 ### 模型选择
+
+配置在 `config.yaml` 中：
+
+```yaml
+api:
+  mineru:
+    model_version: "vlm"  # 或 "pipeline"
+```
 
 - **VLM模型**（推荐）：基于视觉语言模型，精度高，适合复杂学术论文
 - **Pipeline模型**：传统OCR流程，速度快，适合简单文档
@@ -304,47 +656,191 @@ results = agent.extract_from_urls(
 ### 测试MinerU
 
 ```bash
+# 简单测试
 python test_mineru_simple.py
+
+# 完整测试（包括批量、文件上传）
+python test_mineru.py
 ```
+
+### 使用限制
+
+- 单个文件最大100MB
+- 每天2000页免费额度
+- 解析时间依PDF复杂度：通常10-60秒
+- 需要网络连接（调用云API）
 
 ---
 
-## 📁 项目结构
+## 📁 数据流和文件系统
+
+### 完整数据流
+
+```
+用户输入 (PDF文件/URL)
+    ↓
+data/input/                      # 用户上传的PDF文件
+    ├── paper1.pdf
+    └── paper2.pdf
+    ↓
+[PDF提取模块]
+    ↓
+data/extracted/                  # 提取的文本和资源
+    ├── paper1_extracted.txt     # 纯文本（用于后续处理）
+    ├── paper1_mineru/           # MinerU完整结果
+    │   ├── extracted/
+    │   │   ├── full.md          # Markdown格式（含公式、表格）
+    │   │   ├── layout.json      # 页面布局信息
+    │   │   ├── {uuid}_content_list.json   # 内容列表
+    │   │   ├── {uuid}_model.json          # 模型信息
+    │   │   ├── {uuid}_origin.pdf          # 原始PDF
+    │   │   └── images/          # 提取的所有图片
+    │   │       ├── {hash1}.jpg  # 图片（hash命名）
+    │   │       ├── {hash2}.jpg
+    │   │       └── ...
+    │   └── result.zip           # 原始ZIP（保留）
+    ├── paper2_extracted.txt
+    └── paper2_mineru/
+    ↓
+[论文清洗模块] (待实现)
+    ↓
+data/cleaned/                    # 清洗后的文本
+    ├── paper1_cleaned.txt       # 移除参考文献、致谢等
+    └── paper2_cleaned.txt
+    ↓
+[论文分析模块] (待实现)
+    ↓
+data/analyzed/                   # 分析结果
+    ├── paper1_analysis.json     # 包含翻译、总结、公式分析
+    │   {
+    │     "title": "论文标题",
+    │     "translation": "中文翻译",
+    │     "summary": "核心总结",
+    │     "methods": ["方法1", "方法2"],
+    │     "formulas": [{"latex": "...", "explanation": "..."}],
+    │     "contributions": ["贡献1", "贡献2"]
+    │   }
+    └── paper2_analysis.json
+    ↓
+[想法生成模块] (待实现)
+    ↓
+data/ideas/                      # 生成的想法
+    ├── ideas_batch1.json        # 想法列表
+    │   {
+    │     "ideas": [
+    │       {
+    │         "id": "idea_001",
+    │         "title": "想法标题",
+    │         "description": "详细描述",
+    │         "novelty_score": 85,
+    │         "feasibility_score": 70,
+    │         "impact_score": 90
+    │       }
+    │     ]
+    │   }
+    └── idea_001_detailed.json   # 详细化的想法
+    ↓
+[代码生成模块] (待实现)
+    ↓
+data/code/                       # 生成的代码
+    ├── idea_001_implementation.py
+    ├── idea_001_test.py
+    └── idea_001_README.md
+```
+
+### 目录结构详解
 
 ```
 Agent_Colab/
-├── agents/              # 各功能Agent
-│   ├── base_agent.py
-│   ├── pdf_extractor_agent.py
-│   ├── paper_cleaner_agent.py
-│   ├── paper_analyzer_agent.py
-│   ├── idea_generator_agent.py
-│   ├── idea_selector_agent.py
-│   ├── idea_detailer_agent.py
-│   └── code_generator_agent.py
-├── config/              # 配置模块
-│   ├── api_config.py
-│   └── prompts.py
-├── utils/               # 工具模块
-│   ├── api_client.py
-│   ├── mineru_client.py
-│   ├── config_loader.py
-│   ├── file_manager.py
-│   └── logger.py
-├── data/                # 数据目录
-│   ├── input/           # PDF输入
-│   ├── extracted/       # 提取结果
-│   ├── cleaned/         # 清洗结果
-│   ├── analyzed/        # 分析结果
-│   ├── ideas/           # 生成的想法
-│   └── code/            # 生成的代码
-├── logs/                # 日志目录
-├── config.yaml          # 主配置文件
-├── main.py              # 主程序
-├── web_ui.py            # Web界面
-├── run.sh               # 启动脚本
-├── start_ui.sh          # UI启动脚本
-└── requirements.txt     # 依赖包
+├── agents/                      # 所有Agent模块
+│   ├── __init__.py
+│   ├── base_agent.py            # 基类，提供日志、配置等
+│   ├── pdf_extractor_agent.py   # ✅ PDF提取（已完成）
+│   ├── paper_cleaner_agent.py   # 🔧 论文清洗（框架）
+│   ├── paper_analyzer_agent.py  # 🔧 论文分析（框架）
+│   ├── idea_generator_agent.py  # 🔧 想法生成（框架）
+│   ├── idea_selector_agent.py   # 🔧 想法筛选（框架）
+│   ├── idea_detailer_agent.py   # 🔧 想法详细化（框架）
+│   └── code_generator_agent.py  # 🔧 代码生成（框架）
+│
+├── config/                      # 配置模块
+│   ├── __init__.py
+│   ├── api_config.py            # API配置定义
+│   └── prompts.py               # 各模块的Prompt模板
+│
+├── utils/                       # 工具模块
+│   ├── __init__.py
+│   ├── api_client.py            # 统一API调用客户端
+│   ├── mineru_client.py         # ✅ MinerU专用客户端（已完成）
+│   ├── config_loader.py         # ✅ 配置加载器（已完成）
+│   ├── file_manager.py          # 文件管理工具
+│   └── logger.py                # ✅ 日志系统（已完成）
+│
+├── data/                        # 数据目录
+│   ├── input/                   # 📥 输入：用户上传的PDF
+│   ├── extracted/               # 📄 提取：文本+MinerU结果
+│   ├── cleaned/                 # 🧹 清洗：移除无关内容
+│   ├── analyzed/                # 🔍 分析：翻译+总结+公式
+│   ├── ideas/                   # 💡 想法：生成的创新点
+│   └── code/                    # 💻 代码：实现代码
+│
+├── logs/                        # 日志目录
+│   └── agentcolab_YYYYMMDD.log  # 按日期的日志文件
+│
+├── config.yaml                  # ⚙️ 主配置文件（含API密钥）
+├── config.example.yaml          # 📋 配置示例（不含密钥）
+├── main.py                      # 🚀 命令行主程序
+├── web_ui.py                    # 🎨 Web界面（Gradio）
+├── run.sh                       # 🔧 启动脚本
+├── requirements.txt             # 📦 Python依赖
+├── test_setup.py                # 🧪 环境测试
+├── test_mineru.py               # 🧪 MinerU完整测试
+├── test_mineru_simple.py        # 🧪 MinerU简单测试
+├── README.md                    # 📖 本文档
+├── ENV_SETUP.md                 # 🔑 环境配置指南
+└── .gitignore                   # 🔒 Git忽略规则
+```
+
+### 文件命名规则
+
+**提取文件**：
+- `{论文名}_extracted.txt` - 纯文本
+- `{论文名}_mineru/` - MinerU完整结果目录
+
+**清洗文件**：
+- `{论文名}_cleaned.txt` - 清洗后文本
+
+**分析文件**：
+- `{论文名}_analysis.json` - JSON格式分析结果
+
+**想法文件**：
+- `ideas_batch{N}.json` - 想法列表
+- `idea_{ID}_detailed.json` - 详细化想法
+
+**代码文件**：
+- `idea_{ID}_implementation.py` - 实现代码
+- `idea_{ID}_test.py` - 测试代码
+- `idea_{ID}_README.md` - 说明文档
+
+### 日志文件
+
+**位置**：`logs/agentcolab_YYYYMMDD.log`
+
+**内容示例**：
+```
+2024-01-15 10:30:45 - AgentColab - INFO - [PDF提取Agent] 开始任务
+2024-01-15 10:30:46 - AgentColab - INFO - 使用MinerU提取: paper1.pdf
+2024-01-15 10:30:47 - AgentColab - INFO - 创建MinerU任务: task_abc123
+2024-01-15 10:31:02 - AgentColab - INFO - 任务状态: running
+2024-01-15 10:31:17 - AgentColab - INFO - 任务状态: done
+2024-01-15 10:31:18 - AgentColab - INFO - 下载结果到: data/extracted/paper1_mineru
+2024-01-15 10:31:20 - AgentColab - INFO - ✓ 提取成功，保存到: data/extracted/paper1_extracted.txt
+```
+
+**日志级别配置**（`config.yaml`）：
+```yaml
+logging:
+  level: "INFO"  # DEBUG | INFO | WARNING | ERROR | CRITICAL
 ```
 
 ---
@@ -384,91 +880,382 @@ results = agent.run()
 
 ### Q1: 如何设置API密钥？
 
-**A**: 三种方式，推荐使用环境变量：
+**A**: 推荐使用环境变量（优先级最高）：
 
 ```bash
-# 临时设置（当前会话）
-export GOOGLE_API_KEY="your_key"
+# 临时设置（当前终端会话）
+export GOOGLE_API_KEY="your_gemini_key"
+export DEEPSEEK_API_KEY="your_deepseek_key"
+export ANTHROPIC_API_KEY="your_claude_key"
+export MINERU_API_KEY="your_mineru_key"
 
-# 永久设置（添加到 ~/.bashrc）
+# 永久设置（添加到 ~/.bashrc 或 ~/.zshrc）
 echo 'export GOOGLE_API_KEY="your_key"' >> ~/.bashrc
 source ~/.bashrc
 
-# 或在 config.yaml 中配置
+# 或使用 .env 文件
+cat > .env << EOF
+GOOGLE_API_KEY=your_key
+DEEPSEEK_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key
+MINERU_API_KEY=your_key
+EOF
+
+# 或在 config.yaml 中配置（优先级较低）
+# 编辑 config.yaml 的 api_keys 部分
 ```
+
+**验证配置**：
+```bash
+./run.sh check
+# 或
+python test_setup.py
+```
+
+---
 
 ### Q2: MinerU和PyPDF2如何选择？
 
-**A**: 
-- **MinerU**：精度高，支持公式表格，需要PDF URL，每天2000页免费
-- **PyPDF2**：速度快，可处理本地文件，精度较低，完全免费
+**A**: 根据需求选择：
 
-推荐：学术论文用MinerU，简单文档用PyPDF2
+| 特性 | MinerU | PyPDF2 |
+|------|--------|--------|
+| **精度** | ⭐⭐⭐⭐⭐ 高 | ⭐⭐ 低 |
+| **公式识别** | ✅ 支持（LaTeX） | ❌ 不支持 |
+| **表格识别** | ✅ 支持（Markdown） | ❌ 不支持 |
+| **图片提取** | ✅ 自动提取 | ❌ 不支持 |
+| **输入方式** | URL + 文件上传 | 仅本地文件 |
+| **网络要求** | ✅ 需要 | ❌ 不需要 |
+| **API密钥** | ✅ 需要 | ❌ 不需要 |
+| **免费额度** | 2000页/天 | ♾️ 无限 |
+| **速度** | 10-60秒/文档 | <1秒/文档 |
+| **适用场景** | 学术论文、复杂文档 | 简单文本文档 |
+
+**推荐**：
+- 📚 学术论文（含公式、表格）→ 使用 MinerU
+- 📄 简单文档（纯文本）→ 使用 PyPDF2
+- 🚫 无网络环境 → 使用 PyPDF2
+
+**切换方式**：
+```python
+# 使用MinerU
+agent = PDFExtractorAgent(use_mineru=True)
+
+# 使用PyPDF2
+agent = PDFExtractorAgent(use_mineru=False)
+```
+
+---
 
 ### Q3: 如何处理本地PDF文件？
 
-**A**: 两种方案：
+**A**: 三种方式：
 
+**方式1：Web UI上传（推荐）**
 ```bash
-# 方案1: 上传到云存储获取URL，使用MinerU
+./run.sh ui
+# 在浏览器中：PDF提取 → 上传文件 → 选择MinerU → 开始提取
+```
+
+**方式2：Python代码上传到MinerU**
+```python
+from agents import PDFExtractorAgent
+
 agent = PDFExtractorAgent(use_mineru=True)
-agent.extract_from_url("https://your-storage.com/paper.pdf")
+content = agent.extract_from_file(
+    pdf_path="path/to/paper.pdf",
+    pdf_name="my_paper"
+)
+# 自动上传到MinerU服务器并解析
+```
 
-# 方案2: 直接使用PyPDF2
+**方式3：使用PyPDF2本地处理**
+```python
+# 1. 将PDF放入data/input/目录
+# 2. 使用PyPDF2提取
 agent = PDFExtractorAgent(use_mineru=False)
-agent.run()  # 自动处理 data/input/ 目录
+results = agent.run()
 ```
 
-### Q4: 完整流程需要多长时间？
+---
 
-**A**: 取决于论文数量和API速度：
-- 单篇论文：约5-10分钟
-- 3-5篇论文：约20-30分钟
-- 建议先小批量测试
+### Q4: MinerU提取的文件在哪里？
 
-### Q5: API调用失败怎么办？
+**A**: 完整结构如下：
 
-**A**: 检查步骤：
-1. 确认API密钥正确（无多余空格）
-2. 检查网络连接
-3. 查看日志文件：`logs/agentcolab_*.log`
-4. 验证API额度是否充足
-
-### Q6: 如何查看处理结果？
-
-**A**: 所有结果保存在 `data/` 目录：
-
-```bash
-ls -la data/extracted/   # 提取的文本
-ls -la data/cleaned/     # 清洗后的文本
-ls -la data/analyzed/    # 分析结果
-ls -la data/ideas/       # 生成的想法
-ls -la data/code/        # 生成的代码
+```
+data/extracted/
+├── 论文名_extracted.txt          # 纯文本（用于后续Agent处理）
+└── 论文名_mineru/                 # MinerU完整结果
+    ├── extracted/
+    │   ├── full.md                # Markdown格式（含公式、表格）
+    │   ├── layout.json            # 布局信息
+    │   ├── {uuid}_content_list.json   # 内容列表
+    │   ├── {uuid}_model.json          # 模型信息
+    │   ├── {uuid}_origin.pdf          # 原始PDF
+    │   └── images/                # 所有提取的图片
+    │       ├── {hash1}.jpg
+    │       ├── {hash2}.jpg
+    │       └── ...
+    └── result.zip                 # 原始ZIP文件（保留）
 ```
 
-### Q7: Web UI无法启动？
+**访问方式**：
+```python
+import os
+import json
 
-**A**: 
+# 读取纯文本（用于后续Agent处理）
+with open('data/extracted/论文名_extracted.txt', 'r', encoding='utf-8') as f:
+    text = f.read()
+
+# 读取Markdown（含公式和表格）
+with open('data/extracted/论文名_mineru/extracted/full.md', 'r', encoding='utf-8') as f:
+    markdown = f.read()
+
+# 读取布局信息
+with open('data/extracted/论文名_mineru/extracted/layout.json', 'r', encoding='utf-8') as f:
+    layout = json.load(f)
+
+# 读取内容列表（找到UUID前缀的文件）
+extracted_dir = 'data/extracted/论文名_mineru/extracted/'
+content_list_file = [f for f in os.listdir(extracted_dir) if f.endswith('_content_list.json')][0]
+with open(os.path.join(extracted_dir, content_list_file), 'r', encoding='utf-8') as f:
+    content_list = json.load(f)
+
+# 查看提取的图片
+images_dir = 'data/extracted/论文名_mineru/extracted/images/'
+images = os.listdir(images_dir)
+print(f"提取了 {len(images)} 张图片")
+```
+
+---
+
+### Q5: 完整流程需要多长时间？
+
+**A**: 取决于多个因素：
+
+| 阶段 | 单篇论文 | 3篇论文 | 10篇论文 |
+|------|---------|---------|----------|
+| **PDF提取（MinerU）** | 10-60秒 | 30-180秒 | 5-10分钟 |
+| **PDF提取（PyPDF2）** | <1秒 | 1-3秒 | 3-10秒 |
+| **论文清洗** | 待实现 | 待实现 | 待实现 |
+| **论文分析** | 待实现 | 待实现 | 待实现 |
+| **想法生成** | 待实现 | 待实现 | 待实现 |
+| **代码生成** | 待实现 | 待实现 | 待实现 |
+
+**影响因素**：
+- PDF复杂度（页数、公式、表格数量）
+- 网络速度
+- API响应时间
+- 服务器负载
+
+**建议**：
+- 首次使用建议单篇测试
+- 批量处理建议5篇以下
+- 可在Web UI中实时查看进度
+
+---
+
+### Q6: API调用失败怎么办？
+
+**A**: 系统化排查：
+
+**1. 检查API密钥**
 ```bash
-# 检查Gradio是否安装
+# 查看环境变量
+echo $GOOGLE_API_KEY
+echo $MINERU_API_KEY
+
+# 检查配置
+cat config.yaml | grep api_key
+
+# 验证密钥
+python test_setup.py
+```
+
+**2. 检查网络连接**
+```bash
+# 测试Gemini连接
+curl -H "x-goog-api-key: $GOOGLE_API_KEY" \
+  https://generativelanguage.googleapis.com/v1beta/models
+
+# 测试MinerU连接
+curl https://mineru.net/api/v4/extract/task
+```
+
+**3. 查看日志**
+```bash
+# 查看最新日志
+tail -f logs/agentcolab_*.log
+
+# 搜索错误
+grep -i error logs/agentcolab_*.log
+```
+
+**4. 检查API额度**
+- Gemini: https://aistudio.google.com/app/apikey
+- MinerU: 登录 https://mineru.net 查看剩余额度
+
+**常见错误**：
+```
+错误: "API key not valid"
+解决: 检查密钥是否正确，注意前后空格
+
+错误: "Rate limit exceeded"
+解决: 等待一段时间或升级API套餐
+
+错误: "Connection timeout"
+解决: 检查网络，或增加timeout配置
+
+错误: "Task failed: xxx"
+解决: 检查PDF文件是否损坏或格式不支持
+```
+
+---
+
+### Q7: 如何查看处理结果？
+
+**A**: 多种方式：
+
+**方式1：文件系统**
+```bash
+# 查看提取结果
+ls -lh data/extracted/
+cat data/extracted/论文名_extracted.txt
+
+# 查看MinerU图片
+ls -lh data/extracted/论文名_mineru/extracted/images/
+
+# 查看其他结果
+ls -lh data/cleaned/
+ls -lh data/analyzed/
+ls -lh data/ideas/
+ls -lh data/code/
+```
+
+**方式2：Web UI**
+- 每个模块运行后会显示结果
+- 可直接下载文件
+
+**方式3：Python代码**
+```python
+import json
+
+# 读取分析结果
+with open('data/analyzed/paper1_analysis.json', 'r') as f:
+    analysis = json.load(f)
+    print(analysis['summary'])
+
+# 读取想法
+with open('data/ideas/ideas_batch1.json', 'r') as f:
+    ideas = json.load(f)
+    for idea in ideas['ideas']:
+        print(f"{idea['title']}: {idea['novelty_score']}")
+```
+
+---
+
+### Q8: Web UI无法启动？
+
+**A**: 逐步排查：
+
+**检查依赖**：
+```bash
 pip install gradio>=4.0.0
+pip install -r requirements.txt
+```
 
-# 检查端口是否被占用
+**检查端口占用**：
+```bash
+# 查看7860端口是否被占用
 lsof -i :7860
 
-# 查看错误日志
-python web_ui.py
+# 如被占用，杀掉进程
+kill -9 <PID>
+
+# 或使用其他端口
+python web_ui.py --server-port 7861
 ```
 
-### Q8: 如何自定义Prompt？
+**查看错误信息**：
+```bash
+# 直接运行查看详细错误
+python web_ui.py
 
-**A**: 编辑 `config/prompts.py` 或在 `config.yaml` 中覆盖：
+# 检查Python版本（需要3.8+）
+python --version
+```
 
+**常见问题**：
+```
+错误: "ModuleNotFoundError: No module named 'gradio'"
+解决: pip install gradio
+
+错误: "Address already in use"
+解决: 更换端口或结束占用进程
+
+错误: "TypeError: BlockContext.__init__() got an unexpected keyword argument 'theme'"
+解决: 升级Gradio: pip install --upgrade gradio
+```
+
+---
+
+### Q9: 如何自定义Prompt？
+
+**A**: 两种方式：
+
+**方式1：修改prompts.py**
+```python
+# 编辑 config/prompts.py
+PAPER_TRANSLATION_PROMPT = """
+你的自定义翻译prompt...
+"""
+
+PAPER_SUMMARY_PROMPT = """
+你的自定义总结prompt...
+"""
+```
+
+**方式2：在config.yaml中覆盖**
 ```yaml
 prompts:
-  paper_translation: "你的自定义prompt"
-  paper_summary: "你的自定义prompt"
+  paper_translation: |
+    你的自定义翻译prompt...
+    可以多行...
+  
+  paper_summary: |
+    你的自定义总结prompt...
 ```
+
+---
+
+### Q10: 如何批量处理大量PDF？
+
+**A**: 建议策略：
+
+**小批量处理**：
+```python
+from agents import PDFExtractorAgent
+
+agent = PDFExtractorAgent(use_mineru=True)
+
+# 分批处理，每批5个
+batch_size = 5
+all_pdfs = ["pdf1.pdf", "pdf2.pdf", ..., "pdf100.pdf"]
+
+for i in range(0, len(all_pdfs), batch_size):
+    batch = all_pdfs[i:i+batch_size]
+    results = agent.batch_extract_from_files(batch)
+    print(f"完成第 {i//batch_size + 1} 批")
+    time.sleep(60)  # 避免API限流
+```
+
+**注意事项**：
+- MinerU每天2000页限额
+- 建议每批5个以下
+- 批次间隔60秒以上
+- 监控日志文件
 
 ---
 
