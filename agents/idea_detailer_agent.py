@@ -177,11 +177,19 @@ class IdeaDetailerAgent(BaseAgent):
         Returns:
             格式化的文本
         """
+        self.logger.info("=" * 80)
+        self.logger.info("📝 开始格式化输入给LLM")
+        self.logger.info("=" * 80)
+        
         formatted_text = ""
         
         # 按paper_key排序
         sorted_keys = sorted(source_papers.keys(), 
                            key=lambda x: int(x.split('_')[1]) if '_' in x else 0)
+        
+        self.logger.info(f"📚 论文数量: {len(sorted_keys)}")
+        self.logger.info(f"📚 论文列表: {sorted_keys}")
+        self.logger.info("")
         
         # 添加论文分析内容（按【Paper_i】格式）
         for paper_key in sorted_keys:
@@ -192,12 +200,37 @@ class IdeaDetailerAgent(BaseAgent):
             # 提取paper编号
             paper_num = paper_key.split('_')[1] if '_' in paper_key else '1'
             
+            self.logger.info(f"📄 添加 Paper_{paper_num}: {name}")
+            self.logger.info(f"   分析内容长度: {len(analysis)} 字符")
+            self.logger.info(f"   分析内容预览: {analysis[:200]}...")
+            self.logger.info("")
+            
             formatted_text += f"【Paper_{paper_num}】{name}：\n\n{analysis}\n\n"
             formatted_text += "=" * 80 + "\n\n"
         
         # 添加想法
+        idea_content = best_idea.get('full_content', '')
+        self.logger.info("💡 添加最优想法")
+        self.logger.info(f"   想法标题: {best_idea.get('title', 'N/A')}")
+        self.logger.info(f"   想法评分: {best_idea.get('score', 'N/A')}")
+        self.logger.info(f"   想法内容长度: {len(idea_content)} 字符")
+        self.logger.info(f"   想法内容预览: {idea_content[:200]}...")
+        self.logger.info("")
+        
         formatted_text += "【基于以上文章的创新想法】\n\n"
-        formatted_text += best_idea.get('full_content', '')
+        formatted_text += idea_content
+        
+        self.logger.info("=" * 80)
+        self.logger.info("📊 格式化完成统计")
+        self.logger.info("=" * 80)
+        self.logger.info(f"总字符数: {len(formatted_text)}")
+        self.logger.info(f"总行数: {formatted_text.count(chr(10))}")
+        self.logger.info("")
+        self.logger.info("📋 完整输入内容预览（前500字符）:")
+        self.logger.info("-" * 80)
+        self.logger.info(formatted_text[:500])
+        self.logger.info("-" * 80)
+        self.logger.info("")
         
         return formatted_text
     
@@ -232,14 +265,60 @@ class IdeaDetailerAgent(BaseAgent):
 5. 确保内容详实、逻辑清晰、可操作性强
 """
         
+        system_prompt = "你是研究方案详细化助手。基于提供的论文分析和创新想法，生成详细的研究方案，包含完整的公式推导。直接输出内容，不要客套话。"
+        
+        # 打印完整的输入信息
+        self.logger.info("=" * 80)
+        self.logger.info("🚀 准备调用 LLM")
+        self.logger.info("=" * 80)
+        self.logger.info(f"API提供商: {self.llm_client.api_provider}")
+        self.logger.info(f"模型: {self.llm_client.model}")
+        self.logger.info(f"温度: {self.llm_client.temperature}")
+        self.logger.info(f"最大tokens: {self.llm_client.max_tokens}")
+        self.logger.info("")
+        
+        self.logger.info("📝 System Prompt:")
+        self.logger.info("-" * 80)
+        self.logger.info(system_prompt)
+        self.logger.info("-" * 80)
+        self.logger.info("")
+        
+        self.logger.info("📝 User Prompt 统计:")
+        self.logger.info(f"   总字符数: {len(prompt)}")
+        self.logger.info(f"   总行数: {prompt.count(chr(10))}")
+        self.logger.info(f"   估算tokens: ~{len(prompt) // 2}")  # 粗略估算
+        self.logger.info("")
+        
+        self.logger.info("📝 User Prompt 完整内容:")
+        self.logger.info("=" * 80)
+        self.logger.info(prompt)
+        self.logger.info("=" * 80)
+        self.logger.info("")
+        
         # 调用LLM
         try:
+            self.logger.info("⏳ 正在调用 LLM...")
             result = self.llm_client.generate(
                 prompt=prompt,
-                system_prompt="你是研究方案详细化助手。基于提供的论文分析和创新想法，生成详细的研究方案，包含完整的公式推导。直接输出内容，不要客套话。"
+                system_prompt=system_prompt
             )
+            
+            self.logger.info("=" * 80)
+            self.logger.info("✅ LLM 调用成功")
+            self.logger.info("=" * 80)
+            self.logger.info(f"响应长度: {len(result)} 字符")
+            self.logger.info(f"响应预览（前500字符）:")
+            self.logger.info("-" * 80)
+            self.logger.info(result[:500])
+            self.logger.info("-" * 80)
+            self.logger.info("")
+            
             return result
             
         except Exception as e:
-            self.log_error(f"LLM调用失败: {str(e)}")
+            self.logger.error("=" * 80)
+            self.logger.error("❌ LLM 调用失败")
+            self.logger.error("=" * 80)
+            self.log_error(f"错误信息: {str(e)}")
+            self.logger.error("")
             raise

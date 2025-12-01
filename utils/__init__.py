@@ -3,8 +3,8 @@
 """
 
 from utils.api_client import (
-    GeminiClient, DeepSeekClient, ClaudeClient,
-    get_gemini_client, get_deepseek_client, get_claude_client
+    GeminiClient, DeepSeekClient, ClaudeClient, GptsApiClient,
+    get_llm_client, UnifiedLLMClient
 )
 from utils.mineru_client import MinerUClient, get_mineru_client
 from utils.file_manager import file_manager, FileManager
@@ -13,8 +13,8 @@ from utils.config_loader import config_loader, ConfigLoader
 from utils.paper_collection import PaperCollection, create_collection_from_extraction
 
 __all__ = [
-    'GeminiClient', 'DeepSeekClient', 'ClaudeClient', 'MinerUClient',
-    'get_gemini_client', 'get_deepseek_client', 'get_claude_client', 'get_mineru_client',
+    'GeminiClient', 'DeepSeekClient', 'ClaudeClient', 'GptsApiClient', 'MinerUClient',
+    'get_llm_client', 'UnifiedLLMClient', 'get_mineru_client',
     'file_manager', 'FileManager',
     'logger', 'LoggerManager',
     'config_loader', 'ConfigLoader',

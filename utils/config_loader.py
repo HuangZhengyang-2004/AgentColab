@@ -53,6 +53,7 @@ class ConfigLoader:
                 'google_api_key': '',
                 'deepseek_api_key': '',
                 'anthropic_api_key': '',
+                'gptsapi_key': '',
                 'mineru_api_key': '',
             },
             'api': {
@@ -154,6 +155,7 @@ class ConfigLoader:
             'gemini': ('GOOGLE_API_KEY', 'google_api_key'),
             'deepseek': ('DEEPSEEK_API_KEY', 'deepseek_api_key'),
             'claude': ('ANTHROPIC_API_KEY', 'anthropic_api_key'),
+            'gptsapi': ('GPTSAPI_KEY', 'gptsapi_key'),
             'mineru': ('MINERU_API_KEY', 'mineru_api_key'),
         }
         

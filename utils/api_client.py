@@ -16,19 +16,26 @@ from utils.logger import logger
 class GeminiClient:
     """Gemini API客户端"""
     
-    def __init__(self):
-        """初始化Gemini客户端"""
+    def __init__(self, model: str = None, temperature: float = None, max_tokens: int = None):
+        """
+        初始化Gemini客户端
+        
+        Args:
+            model: 模型名称（可选，使用API配置的默认值）
+            temperature: 温度参数（可选）
+            max_tokens: 最大输出token数（可选）
+        """
         config = config_loader.get_api_config('gemini')
         if not config.get('api_key'):
             raise ValueError("未设置GOOGLE_API_KEY，请在config.yaml中配置或设置环境变量")
         
         genai.configure(api_key=config['api_key'])
-        self.model_name = config.get('model', 'gemini-2.5-flash')
+        self.model_name = model or config.get('model', 'gemini-1.5-flash')
         self.generation_config = {
-            'temperature': config.get('temperature', 0.7),
+            'temperature': temperature if temperature is not None else config.get('temperature', 0.7),
             'top_p': config.get('top_p', 1),
             'top_k': config.get('top_k', 1),
-            'max_output_tokens': config.get('max_output_tokens', 8192),
+            'max_output_tokens': max_tokens or config.get('max_output_tokens', 8192),
         }
     
     def generate(self, prompt: str, stream: bool = False) -> str:
@@ -102,8 +109,15 @@ class GeminiClient:
 class DeepSeekClient:
     """DeepSeek API客户端"""
     
-    def __init__(self):
-        """初始化DeepSeek客户端"""
+    def __init__(self, model: str = None, temperature: float = None, max_tokens: int = None):
+        """
+        初始化DeepSeek客户端
+        
+        Args:
+            model: 模型名称（可选，使用API配置的默认值）
+            temperature: 温度参数（可选）
+            max_tokens: 最大输出token数（可选）
+        """
         config = config_loader.get_api_config('deepseek')
         if not config.get('api_key'):
             raise ValueError("未设置DEEPSEEK_API_KEY，请在config.yaml中配置或设置环境变量")
@@ -112,9 +126,9 @@ class DeepSeekClient:
             api_key=config['api_key'],
             base_url=config.get('base_url', 'https://api.deepseek.com')
         )
-        self.model = config.get('model', 'deepseek-chat')
-        self.temperature = config.get('temperature', 0.7)
-        self.max_tokens = config.get('max_tokens', 4096)
+        self.model = model or config.get('model', 'deepseek-chat')
+        self.temperature = temperature if temperature is not None else config.get('temperature', 0.7)
+        self.max_tokens = max_tokens or config.get('max_tokens', 4096)
     
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
@@ -149,19 +163,84 @@ class DeepSeekClient:
             raise
 
 
+class GptsApiClient:
+    """GptsApi客户端 - 使用OpenAI兼容接口访问第三方Gemini服务"""
+    
+    def __init__(self, model: str = None, temperature: float = None, max_tokens: int = None):
+        """
+        初始化GptsApi客户端
+        
+        Args:
+            model: 模型名称（可选，使用API配置的默认值）
+            temperature: 温度参数（可选）
+            max_tokens: 最大输出token数（可选）
+        """
+        config = config_loader.get_api_config('gptsapi')
+        if not config.get('api_key'):
+            raise ValueError("未设置GPTSAPI_KEY，请在config.yaml中配置或设置环境变量")
+        
+        # 使用OpenAI客户端，只需改变base_url
+        self.client = OpenAI(
+            api_key=config['api_key'],
+            base_url=config.get('base_url', 'https://api.gptsapi.net/v1')
+        )
+        self.model = model or config.get('model', 'gemini-3-pro-preview')
+        self.temperature = temperature if temperature is not None else config.get('temperature', 0.7)
+        self.max_tokens = max_tokens or config.get('max_tokens', 8192)
+    
+    def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """
+        生成文本
+        
+        Args:
+            prompt: 用户输入
+            system_prompt: 系统提示（可选）
+            
+        Returns:
+            生成的文本
+        """
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
+            logger.info(f"调用GptsApi (Gemini)，模型: {self.model}")
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error(f"GptsApi调用失败: {str(e)}")
+            raise
+
+
 class ClaudeClient:
     """Claude API客户端"""
     
-    def __init__(self):
-        """初始化Claude客户端"""
+    def __init__(self, model: str = None, temperature: float = None, max_tokens: int = None):
+        """
+        初始化Claude客户端
+        
+        Args:
+            model: 模型名称（可选，使用API配置的默认值）
+            temperature: 温度参数（可选）
+            max_tokens: 最大输出token数（可选）
+        """
         config = config_loader.get_api_config('claude')
         if not config.get('api_key'):
             raise ValueError("未设置ANTHROPIC_API_KEY，请在config.yaml中配置或设置环境变量")
         
         self.client = Anthropic(api_key=config['api_key'])
-        self.model = config.get('model', 'claude-3-5-sonnet-20241022')
-        self.temperature = config.get('temperature', 0.7)
-        self.max_tokens = config.get('max_tokens', 4096)
+        self.model = model or config.get('model', 'claude-3-5-sonnet-20241022')
+        self.temperature = temperature if temperature is not None else config.get('temperature', 0.7)
+        self.max_tokens = max_tokens or config.get('max_tokens', 4096)
     
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """
@@ -196,27 +275,15 @@ class ClaudeClient:
 
 
 # 创建全局客户端实例的工厂函数
-def get_gemini_client() -> GeminiClient:
-    """获取Gemini客户端实例"""
-    return GeminiClient()
-
-
-def get_deepseek_client() -> DeepSeekClient:
-    """获取DeepSeek客户端实例"""
-    return DeepSeekClient()
-
-
-def get_claude_client() -> ClaudeClient:
-    """获取Claude客户端实例"""
-    return ClaudeClient()
-
-
-def get_llm_client(api_provider: str):
+def get_llm_client(api_provider: str, model: str = None, temperature: float = None, max_tokens: int = None):
     """
     根据配置获取对应的LLM客户端
     
     Args:
-        api_provider: API提供商名称 (deepseek, gemini, claude)
+        api_provider: API提供商名称 (deepseek, gemini, claude, gptsapi)
+        model: 模型名称（可选）
+        temperature: 温度参数（可选）
+        max_tokens: 最大token数（可选）
         
     Returns:
         对应的客户端实例
@@ -224,13 +291,15 @@ def get_llm_client(api_provider: str):
     api_provider = api_provider.lower()
     
     if api_provider == "deepseek":
-        return get_deepseek_client()
+        return DeepSeekClient(model, temperature, max_tokens)
     elif api_provider == "gemini":
-        return get_gemini_client()
+        return GeminiClient(model, temperature, max_tokens)
     elif api_provider == "claude":
-        return get_claude_client()
+        return ClaudeClient(model, temperature, max_tokens)
+    elif api_provider == "gptsapi":
+        return GptsApiClient(model, temperature, max_tokens)
     else:
-        raise ValueError(f"不支持的API提供商: {api_provider}。支持的选项: deepseek, gemini, claude")
+        raise ValueError(f"不支持的API提供商: {api_provider}。支持的选项: deepseek, gemini, claude, gptsapi")
 
 
 class UnifiedLLMClient:
@@ -244,8 +313,8 @@ class UnifiedLLMClient:
         初始化统一客户端
         
         Args:
-            api_provider: API提供商 (deepseek, gemini, claude)
-            model: 模型名称（可选，使用默认配置）
+            api_provider: API提供商 (deepseek, gemini, claude, gptsapi)
+            model: 模型名称（必须指定）
             temperature: 温度参数
             max_tokens: 最大token数
         """
@@ -253,7 +322,9 @@ class UnifiedLLMClient:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.client = get_llm_client(self.api_provider)
+        
+        # 传递参数给底层客户端
+        self.client = get_llm_client(self.api_provider, model, temperature, max_tokens)
         
         logger.info(f"初始化LLM客户端: {self.api_provider}, 模型: {model or '默认'}")
     
@@ -276,6 +347,6 @@ class UnifiedLLMClient:
                 full_prompt = prompt
             return self.client.generate(full_prompt)
         else:
-            # DeepSeek和Claude支持system_prompt
+            # DeepSeek, Claude, GptsApi都支持system_prompt
             return self.client.generate(prompt, system_prompt)
 
