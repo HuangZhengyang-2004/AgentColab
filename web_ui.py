@@ -323,24 +323,65 @@ def clean_papers(progress=gr.Progress()):
 # ==================== 论文分析 ====================
 
 def analyze_papers(progress=gr.Progress()):
-    """分析论文"""
+    """分析论文 - 使用DeepSeek分析核心内容和算法"""
     try:
         progress(0.1, desc="初始化论文分析Agent...")
         agent = PaperAnalyzerAgent()
         
-        progress(0.3, desc="分析论文中（这可能需要较长时间）...")
+        progress(0.3, desc="使用DeepSeek分析论文中（这可能需要较长时间）...")
         results = agent.run()
         
         progress(1.0, desc="分析完成！")
         
-        summary = f"✅ 分析完成！共处理 {len(results)} 篇论文\n\n"
-        for name in results.keys():
-            summary += f"• {name}\n"
+        if not results:
+            return "❌ 没有找到需要分析的论文\n请先执行清洗步骤"
         
-        return summary
+        # 生成报告
+        report = f"✅ 分析完成！共处理 {len(results)} 篇论文\n\n"
+        report += "分析统计:\n"
+        report += "=" * 60 + "\n\n"
+        
+        for paper_key, analysis in results.items():
+            analysis_len = len(analysis)
+            # 计算Markdown标题数量
+            title_count = analysis.count('\n#')
+            
+            report += f"{paper_key}:\n"
+            report += f"  分析长度: {analysis_len:,} 字符\n"
+            report += f"  章节数: {title_count}\n"
+            report += f"  预览: {analysis[:100].replace(chr(10), ' ')}...\n\n"
+        
+        report += "=" * 60 + "\n"
+        report += "保存位置:\n"
+        report += "  • Markdown文件: data/analyzed/paper_*_analysis.md\n"
+        report += "  • 集合文件: data/collections/all_papers_analyzed.json\n"
+        report += "  • 统计信息: data/analyzed/analysis_stats.json\n"
+        
+        return report
         
     except Exception as e:
-        return f"❌ 分析失败: {str(e)}"
+        import traceback
+        return f"❌ 分析失败: {str(e)}\n\n{traceback.format_exc()}"
+
+
+def view_analysis(paper_key):
+    """查看分析结果"""
+    try:
+        from pathlib import Path
+        
+        # 尝试读取Markdown文件
+        analysis_file = Path(f"data/analyzed/{paper_key}_analysis.md")
+        
+        if not analysis_file.exists():
+            return f"❌ 未找到 {paper_key} 的分析结果\n\n请先执行论文分析"
+        
+        with open(analysis_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return f"# 📊 {paper_key} 分析结果\n\n" + content
+        
+    except Exception as e:
+        return f"❌ 读取失败: {str(e)}"
 
 
 # ==================== 想法生成 ====================
@@ -785,18 +826,56 @@ def create_ui():
             with gr.Row():
                 with gr.Column():
                     gr.Markdown("### 1️⃣ 清洗论文")
-                    gr.Markdown("删除附录、参考文献等无关内容")
-                    clean_btn = gr.Button("🧹 清洗论文", variant="primary")
-                    clean_output = gr.Textbox(label="清洗结果", lines=5)
+                    gr.Markdown("删除引用、参考文献等无关内容")
+                    clean_btn = gr.Button("🧹 清洗论文", variant="primary", size="lg")
+                    clean_output = gr.Textbox(label="清洗结果", lines=20)
+                    
+                    clean_btn.click(
+                        fn=clean_papers,
+                        outputs=clean_output
+                    )
                 
                 with gr.Column():
-                    gr.Markdown("### 2️⃣ 分析论文")
-                    gr.Markdown("翻译、分析和推导公式")
-                    analyze_btn = gr.Button("🔍 分析论文", variant="primary")
-                    analyze_output = gr.Textbox(label="分析结果", lines=5)
+                    gr.Markdown("### 2️⃣ 分析论文（DeepSeek）")
+                    gr.Markdown("""
+                    使用DeepSeek分析论文核心内容和算法实现逻辑
+                    
+                    **分析内容：**
+                    - 📋 论文核心内容（研究问题、创新点）
+                    - 🔬 核心算法实现逻辑（算法原理、关键步骤）
+                    - ✨ 技术亮点和贡献
+                    
+                    **输出格式：** Markdown
+                    """)
+                    analyze_btn = gr.Button("🔬 分析论文", variant="primary", size="lg")
+                    analyze_output = gr.Textbox(label="分析结果", lines=20)
+                    
+                    analyze_btn.click(
+                        fn=analyze_papers,
+                        outputs=analyze_output
+                    )
             
-            clean_btn.click(fn=clean_papers, outputs=clean_output)
-            analyze_btn.click(fn=analyze_papers, outputs=analyze_output)
+            # 查看分析结果
+            with gr.Row():
+                gr.Markdown("### 3️⃣ 查看分析结果")
+            
+            with gr.Row():
+                with gr.Column(scale=2):
+                    view_paper_key = gr.Textbox(
+                        label="论文键名",
+                        placeholder="paper_1",
+                        value="paper_1"
+                    )
+                with gr.Column(scale=1):
+                    view_analysis_btn = gr.Button("👁️ 查看分析", variant="secondary")
+            
+            analysis_viewer = gr.Markdown(label="分析内容")
+            
+            view_analysis_btn.click(
+                fn=view_analysis,
+                inputs=[view_paper_key],
+                outputs=[analysis_viewer]
+            )
         
         # ==================== Tab 4: 想法生成 ====================
         with gr.Tab("💡 想法生成"):

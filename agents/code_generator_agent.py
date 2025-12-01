@@ -4,17 +4,40 @@
 """
 
 from agents.base_agent import BaseAgent
-from utils.api_client import get_claude_client
+from utils.api_client import UnifiedLLMClient
 from config.prompts import prompts
 
 
 class CodeGeneratorAgent(BaseAgent):
-    """代码生成Agent"""
+    """代码生成Agent - 可配置使用不同的LLM"""
     
-    def __init__(self):
-        """初始化代码生成Agent"""
+    def __init__(self, api_provider: str = None, model: str = None):
+        """
+        初始化代码生成Agent
+        
+        Args:
+            api_provider: API提供商，None则从配置读取
+            model: 模型名称，None则从配置读取
+        """
         super().__init__("代码生成Agent")
-        self.claude_client = get_claude_client()
+        
+        # 从配置读取API设置
+        if api_provider is None:
+            api_provider = self.config_loader.get('pipeline.code_generation.api_provider', 'claude')
+        if model is None:
+            model = self.config_loader.get('pipeline.code_generation.model', 'claude-3-5-sonnet-20241022')
+        
+        temperature = self.config_loader.get('pipeline.code_generation.temperature', 0.3)
+        max_tokens = self.config_loader.get('pipeline.code_generation.max_tokens', 4096)
+        
+        self.llm_client = UnifiedLLMClient(
+            api_provider=api_provider,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        self.logger.info(f"使用 {api_provider} API, 模型: {model}")
     
     def run(self, detailed_idea: str = None) -> str:
         """
@@ -97,7 +120,7 @@ class CodeGeneratorAgent(BaseAgent):
 6. 可以直接运行
 """
         
-        result = self.claude_client.generate(
+        result = self.llm_client.generate(
             prompt=prompt,
             system_prompt=system_prompt
         )

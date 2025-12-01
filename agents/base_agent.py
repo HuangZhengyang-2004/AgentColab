@@ -9,6 +9,7 @@ from datetime import datetime
 
 from utils.logger import logger
 from utils.file_manager import file_manager
+from utils.config_loader import config_loader
 
 
 class BaseAgent(ABC):
@@ -24,6 +25,7 @@ class BaseAgent(ABC):
         self.agent_name = agent_name
         self.logger = logger
         self.file_manager = file_manager
+        self.config_loader = config_loader
         self.created_at = datetime.now()
         
         self.logger.info(f"初始化Agent: {self.agent_name}")

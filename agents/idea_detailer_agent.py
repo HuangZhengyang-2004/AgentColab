@@ -6,17 +6,40 @@
 from typing import Dict, List
 
 from agents.base_agent import BaseAgent
-from utils.api_client import get_gemini_client
+from utils.api_client import UnifiedLLMClient
 from config.prompts import prompts
 
 
 class IdeaDetailerAgent(BaseAgent):
-    """想法详细化Agent"""
+    """想法详细化Agent - 可配置使用不同的LLM"""
     
-    def __init__(self):
-        """初始化想法详细化Agent"""
+    def __init__(self, api_provider: str = None, model: str = None):
+        """
+        初始化想法详细化Agent
+        
+        Args:
+            api_provider: API提供商，None则从配置读取
+            model: 模型名称，None则从配置读取
+        """
         super().__init__("想法详细化Agent")
-        self.gemini_client = get_gemini_client()
+        
+        # 从配置读取API设置
+        if api_provider is None:
+            api_provider = self.config_loader.get('pipeline.idea_detailing.api_provider', 'gemini')
+        if model is None:
+            model = self.config_loader.get('pipeline.idea_detailing.model', 'gemini-2.5-flash')
+        
+        temperature = self.config_loader.get('pipeline.idea_detailing.temperature', 0.7)
+        max_tokens = self.config_loader.get('pipeline.idea_detailing.max_tokens', 8192)
+        
+        self.llm_client = UnifiedLLMClient(
+            api_provider=api_provider,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
+        
+        self.logger.info(f"使用 {api_provider} API, 模型: {model}")
     
     def run(self, best_idea: Dict[str, any] = None, 
             paper_contents: Dict[str, str] = None) -> str:
@@ -172,6 +195,6 @@ class IdeaDetailerAgent(BaseAgent):
             idea_content=idea_content
         )
         
-        result = self.gemini_client.generate(prompt)
+        result = self.llm_client.generate(prompt)
         return result
 
