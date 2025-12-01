@@ -4,33 +4,38 @@
 """
 
 from typing import Dict, List, Optional
+import re
+import json
+from pathlib import Path
 
 from agents.base_agent import BaseAgent
 
 
 class IdeaSelectorAgent(BaseAgent):
-    """最优想法筛选Agent"""
+    """最优想法筛选Agent - 解析Markdown格式的ideas"""
     
     def __init__(self):
         """初始化最优想法筛选Agent"""
         super().__init__("最优想法筛选Agent")
     
-    def run(self, ideas: List[Dict[str, any]] = None) -> Dict[str, any]:
+    def run(self) -> Dict[str, any]:
         """
-        筛选最优idea
+        筛选最优idea并识别使用的论文
         
-        Args:
-            ideas: ideas列表，如果为None则从ideas目录读取
-            
         Returns:
-            最优idea的详细信息
+            {
+                'title': str,
+                'score': int,
+                'description': str,
+                'source_papers': List[str],  # ['paper_1', 'paper_2', ...]
+                'full_content': str
+            }
         """
         self.log_start("筛选最优想法")
         
         try:
-            # 如果未提供ideas，则从文件读取
-            if ideas is None:
-                ideas = self._load_ideas()
+            # 从Markdown文件读取ideas
+            ideas = self._load_ideas_from_markdown()
             
             if not ideas:
                 self.logger.warning("未找到任何ideas")
@@ -58,70 +63,125 @@ class IdeaSelectorAgent(BaseAgent):
             self.log_error(f"筛选想法失败: {str(e)}")
             raise
     
-    def _load_ideas(self) -> List[Dict[str, any]]:
+    def _load_ideas_from_markdown(self) -> List[Dict[str, any]]:
         """
-        从ideas目录加载生成的ideas
+        从Markdown文件解析ideas
         
         Returns:
             ideas列表
         """
+        ideas_file = Path("data/ideas/generated_ideas.md")
+        
+        if not ideas_file.exists():
+            self.logger.warning(f"未找到ideas文件: {ideas_file}")
+            return []
+        
         try:
-            ideas = self.file_manager.load_json('generated_ideas.json', 'ideas')
-            self.logger.info(f"加载了 {len(ideas)} 个ideas")
+            with open(ideas_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 解析Markdown格式的ideas
+            ideas = self._parse_markdown_ideas(content)
+            
+            self.logger.info(f"从Markdown中解析了 {len(ideas)} 个ideas")
             return ideas
+            
         except Exception as e:
-            self.log_error(f"加载ideas失败: {str(e)}")
+            self.log_error(f"读取ideas文件失败: {str(e)}")
             return []
     
-    def get_top_n_ideas(self, ideas: List[Dict[str, any]] = None, n: int = 3) -> List[Dict[str, any]]:
+    def _parse_markdown_ideas(self, content: str) -> List[Dict[str, any]]:
         """
-        获取评分最高的前N个ideas
+        解析Markdown格式的ideas
+        
+        格式示例:
+        ### Idea 1: 标题
+        - **创新性评分：** 92
+        - **详细描述：**
+          ...
         
         Args:
-            ideas: ideas列表
-            n: 要获取的数量
+            content: Markdown内容
             
         Returns:
-            前N个ideas
+            解析后的ideas列表
         """
-        self.log_start(f"获取评分最高的前{n}个想法")
+        ideas = []
         
-        if ideas is None:
-            ideas = self._load_ideas()
+        # 按 ### Idea 分割
+        idea_blocks = re.split(r'###\s+Idea\s+\d+:', content)
         
-        if not ideas:
-            return []
+        for block in idea_blocks[1:]:  # 跳过第一个空块
+            if not block.strip():
+                continue
+            
+            idea = {}
+            
+            # 提取标题（第一行）
+            lines = block.strip().split('\n')
+            idea['title'] = lines[0].strip()
+            
+            # 提取评分
+            score_match = re.search(r'创新性评分[：:]\s*[*\s]*(\d+)', block)
+            if score_match:
+                idea['score'] = int(score_match.group(1))
+            else:
+                idea['score'] = 0
+            
+            # 提取完整描述
+            idea['description'] = block.strip()
+            idea['full_content'] = block.strip()
+            
+            # 识别使用的论文（Paper_1, Paper_2, Paper_3等）
+            paper_mentions = re.findall(r'Paper[_\s]*(\d+)', block)
+            # 去重并排序
+            paper_numbers = sorted(set(int(p) for p in paper_mentions))
+            idea['source_papers'] = [f'paper_{n}' for n in paper_numbers]
+            
+            ideas.append(idea)
         
-        # 按分数排序
-        sorted_ideas = sorted(ideas, key=lambda x: x.get('score', 0), reverse=True)
-        top_ideas = sorted_ideas[:n]
-        
-        self.logger.info(f"返回前{len(top_ideas)}个ideas")
-        for i, idea in enumerate(top_ideas, 1):
-            self.logger.info(f"  {i}. {idea['title']} (分数: {idea['score']})")
-        
-        return top_ideas
+        return ideas
     
-    def filter_ideas_by_score(self, ideas: List[Dict[str, any]] = None, 
-                             min_score: int = 70) -> List[Dict[str, any]]:
+    def get_source_papers_content(self, paper_keys: List[str]) -> Dict[str, dict]:
         """
-        筛选评分高于阈值的ideas
+        获取指定论文的清洗后内容
         
         Args:
-            ideas: ideas列表
-            min_score: 最低分数阈值
+            paper_keys: ['paper_1', 'paper_2', ...]
             
         Returns:
-            符合条件的ideas
+            {
+                'paper_1': {'name': ..., 'content': ...},
+                'paper_2': {'name': ..., 'content': ...},
+                ...
+            }
         """
-        self.log_start(f"筛选评分高于{min_score}的想法")
+        collection_path = Path("data/collections/all_papers_cleaned.json")
         
-        if ideas is None:
-            ideas = self._load_ideas()
+        if not collection_path.exists():
+            self.logger.warning(f"未找到清洗集合: {collection_path}")
+            return {}
         
-        filtered_ideas = [idea for idea in ideas if idea.get('score', 0) >= min_score]
-        
-        self.logger.info(f"找到 {len(filtered_ideas)} 个符合条件的ideas")
-        
-        return filtered_ideas
-
+        try:
+            with open(collection_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            papers = data.get('papers', {})
+            
+            # 提取指定的论文
+            result = {}
+            for paper_key in paper_keys:
+                if paper_key in papers:
+                    result[paper_key] = {
+                        'name': papers[paper_key].get('name', paper_key),
+                        'content': papers[paper_key].get('content', '')
+                    }
+                    self.logger.info(f"加载论文: {paper_key} ({result[paper_key]['name']})")
+                else:
+                    self.logger.warning(f"未找到论文: {paper_key}")
+            
+            return result
+            
+        except Exception as e:
+            self.log_error(f"加载论文内容失败: {str(e)}")
+            return {}

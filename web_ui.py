@@ -448,23 +448,139 @@ def view_ideas():
         return f"❌ 读取失败: {str(e)}"
 
 
+# ==================== 想法筛选 ====================
+
+def select_best_idea(progress=gr.Progress()):
+    """筛选最优想法并识别使用的论文"""
+    try:
+        progress(0.3, desc="解析生成的想法...")
+        
+        from agents import IdeaSelectorAgent
+        agent = IdeaSelectorAgent()
+        
+        progress(0.6, desc="筛选最高分想法...")
+        best_idea = agent.run()
+        
+        progress(1.0, desc="完成！")
+        
+        if not best_idea:
+            return "❌ 未找到想法\n请先执行想法生成"
+        
+        # 生成报告
+        report = f"✅ 最优想法筛选完成！\n\n"
+        report += "=" * 60 + "\n"
+        report += "🏆 最高分想法\n"
+        report += "=" * 60 + "\n\n"
+        report += f"**标题**: {best_idea.get('title', '')}\n\n"
+        report += f"**创新性评分**: {best_idea.get('score', 0)}/100\n\n"
+        report += f"**使用的论文**: {', '.join(best_idea.get('source_papers', []))}\n\n"
+        report += "=" * 60 + "\n"
+        report += "📄 想法描述\n"
+        report += "=" * 60 + "\n\n"
+        report += best_idea.get('description', '')[:500] + "...\n\n"
+        report += "=" * 60 + "\n"
+        report += "保存位置:\n"
+        report += "  • 最优想法: data/ideas/best_idea.json\n"
+        
+        return report
+        
+    except Exception as e:
+        import traceback
+        return f"❌ 筛选失败: {str(e)}\n\n{traceback.format_exc()}"
+
+
+def view_best_idea():
+    """查看最优想法详情"""
+    try:
+        from pathlib import Path
+        import json
+        
+        best_idea_file = Path("data/ideas/best_idea.json")
+        
+        if not best_idea_file.exists():
+            return "❌ 未找到最优想法\n\n请先执行想法筛选"
+        
+        with open(best_idea_file, 'r', encoding='utf-8') as f:
+            best_idea = json.load(f)
+        
+        content = f"# 🏆 最优想法详情\n\n"
+        content += f"## {best_idea.get('title', '')}\n\n"
+        content += f"**创新性评分**: {best_idea.get('score', 0)}/100\n\n"
+        content += f"**使用的论文**: {', '.join(best_idea.get('source_papers', []))}\n\n"
+        content += "---\n\n"
+        content += best_idea.get('full_content', '')
+        
+        return content
+        
+    except Exception as e:
+        return f"❌ 读取失败: {str(e)}"
+
+
 # ==================== 想法详细化 ====================
 
 def detail_idea(progress=gr.Progress()):
-    """详细化最优想法"""
+    """详细化最优想法 - 结合相关论文"""
     try:
         progress(0.1, desc="初始化想法详细化Agent...")
+        
+        from agents import IdeaDetailerAgent
         agent = IdeaDetailerAgent()
         
-        progress(0.3, desc="详细化想法中...")
+        progress(0.3, desc="加载最优想法和相关论文...")
+        progress(0.5, desc="使用LLM详细化想法中（可能需要2-3分钟）...")
+        
         detailed = agent.run()
         
         progress(1.0, desc="详细化完成！")
         
-        return f"✅ 想法详细化完成！\n\n{'='*60}\n\n{detailed}"
+        if not detailed:
+            return "❌ 详细化失败\n请先执行想法筛选"
+        
+        # 生成报告
+        report = f"✅ 想法详细化完成！\n\n"
+        report += "=" * 60 + "\n"
+        report += "📊 详细化统计\n"
+        report += "=" * 60 + "\n\n"
+        report += f"输出长度: {len(detailed):,} 字符\n\n"
+        report += "=" * 60 + "\n"
+        report += "保存位置:\n"
+        report += "  • Markdown文件: data/ideas/detailed_idea.md\n"
+        report += "  • JSON文件: data/ideas/detailed_idea.json\n\n"
+        report += "=" * 60 + "\n"
+        report += "📋 详细化内容预览\n"
+        report += "=" * 60 + "\n\n"
+        
+        # 显示前500字符
+        preview_length = 500
+        if len(detailed) > preview_length:
+            report += detailed[:preview_length] + "\n\n... (还有更多内容)"
+        else:
+            report += detailed
+        
+        return report
         
     except Exception as e:
-        return f"❌ 详细化失败: {str(e)}"
+        import traceback
+        return f"❌ 详细化失败: {str(e)}\n\n{traceback.format_exc()}"
+
+
+def view_detailed_idea():
+    """查看详细化的想法"""
+    try:
+        from pathlib import Path
+        
+        detailed_file = Path("data/ideas/detailed_idea.md")
+        
+        if not detailed_file.exists():
+            return "❌ 未找到详细化的想法\n\n请先执行想法详细化"
+        
+        with open(detailed_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return f"# 📝 详细化的想法\n\n{content}"
+        
+    except Exception as e:
+        return f"❌ 读取失败: {str(e)}"
 
 
 # ==================== 代码生成 ====================
@@ -900,28 +1016,19 @@ def create_ui():
         
         # ==================== Tab 4: 想法生成 ====================
         with gr.Tab("💡 想法生成"):
-            gr.Markdown("## 创新想法生成（DeepSeek）")
-            gr.Markdown("""
-            基于论文分析结果，生成创新性强的研究想法
-            
-            **输入格式**：
-            ```
-            【Paper_1】论文名：分析内容...
-            【Paper_2】论文名：分析内容...
-            【Paper_3】论文名：分析内容...
-            ```
-            
-            **生成内容**：
-            - 多个创新想法（详细描述）
-            - 创新性评分（0-100分）
-            - 按评分从高到低排序
-            """)
+            gr.Markdown("## 创新想法生成与筛选")
             
             with gr.Row():
                 with gr.Column():
-                    gr.Markdown("### 1️⃣ 生成创新想法")
+                    gr.Markdown("### 1️⃣ 生成创新想法（DeepSeek）")
+                    gr.Markdown("""
+                    基于论文分析结果，生成多个创新想法并评分
+                    
+                    **输入**: 【Paper_i】论文名：分析内容...
+                    **输出**: 多个想法 + 创新性评分（0-100）
+                    """)
                     generate_btn = gr.Button("💡 生成想法", variant="primary", size="lg")
-                    ideas_output = gr.Textbox(label="生成结果", lines=20)
+                    ideas_output = gr.Textbox(label="生成结果", lines=15)
                     
                     generate_btn.click(
                         fn=generate_ideas,
@@ -929,37 +1036,111 @@ def create_ui():
                     )
                 
                 with gr.Column():
-                    gr.Markdown("### 2️⃣ 查看完整想法")
-                    view_ideas_btn = gr.Button("👁️ 查看想法", variant="secondary", size="lg")
-                    ideas_viewer = gr.Markdown(label="想法内容")
+                    gr.Markdown("### 2️⃣ 筛选最优想法")
+                    gr.Markdown("""
+                    从生成的想法中找到最高分的，并识别使用的论文
+                    
+                    **功能**:
+                    - 🏆 找出最高分想法
+                    - 📄 识别使用了哪些Paper
+                    - 💾 保存筛选结果
+                    """)
+                    select_btn = gr.Button("🏆 筛选最优", variant="primary", size="lg")
+                    select_output = gr.Textbox(label="筛选结果", lines=15)
+                    
+                    select_btn.click(
+                        fn=select_best_idea,
+                        outputs=select_output
+                    )
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 3️⃣ 查看所有想法")
+                    view_ideas_btn = gr.Button("👁️ 查看所有想法", variant="secondary")
+                    ideas_viewer = gr.Markdown(label="所有想法")
                     
                     view_ideas_btn.click(
                         fn=view_ideas,
                         outputs=ideas_viewer
                     )
+                
+                with gr.Column():
+                    gr.Markdown("### 4️⃣ 查看最优想法详情")
+                    view_best_btn = gr.Button("👁️ 查看最优想法", variant="secondary")
+                    best_viewer = gr.Markdown(label="最优想法")
+                    
+                    view_best_btn.click(
+                        fn=view_best_idea,
+                        outputs=best_viewer
+                    )
         
-        # ==================== Tab 5: 代码生成 ====================
+        # ==================== Tab 5: 想法详细化 ====================
+        with gr.Tab("📝 想法详细化"):
+            gr.Markdown("## 详细化最优想法")
+            gr.Markdown("""
+            将最优想法结合相关论文进行详细化
+            
+            **流程**:
+            1. 读取最优想法和使用的论文列表
+            2. 加载相关论文的清洗后内容
+            3. 按格式组织：【文章1】内容... 【文章2】内容... 【创新想法】...
+            4. 使用LLM详细化想法
+            
+            **Prompt**: "我先给你n篇文章，然后再给你根据这n篇文章结合产生的idea，最后你把这个idea详细化。"
+            
+            **输出内容**:
+            - 研究背景与动机
+            - 核心创新点的深入阐述
+            - 详细的技术实现方案
+            - 实验设计与验证方案
+            - 预期贡献与影响
+            - 可能的挑战与解决方案
+            """)
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 1️⃣ 详细化想法")
+                    detail_btn = gr.Button("📝 详细化", variant="primary", size="lg")
+                    detail_output = gr.Textbox(label="详细化结果", lines=20)
+                    
+                    detail_btn.click(
+                        fn=detail_idea,
+                        outputs=detail_output
+                    )
+                
+                with gr.Column():
+                    gr.Markdown("### 2️⃣ 查看详细化内容")
+                    view_detail_btn = gr.Button("👁️ 查看详细内容", variant="secondary", size="lg")
+                    detail_viewer = gr.Markdown(label="详细化内容")
+                    
+                    view_detail_btn.click(
+                        fn=view_detailed_idea,
+                        outputs=detail_viewer
+                    )
+        
+        # ==================== Tab 6: 代码生成 ====================
         with gr.Tab("💻 代码生成"):
             gr.Markdown("## 代码实现生成")
-            gr.Markdown("### 5️⃣ 生成Python代码")
+            gr.Markdown("### 1️⃣ 生成Python代码")
             
             code_btn = gr.Button("💻 生成代码", variant="primary", size="lg")
             code_output = gr.Code(label="生成的代码", language="python", lines=20)
             
             code_btn.click(fn=generate_code, outputs=code_output)
         
-        # ==================== Tab 6: 完整流程 ====================
+        # ==================== Tab 7: 完整流程 ====================
         with gr.Tab("🚀 完整流程"):
             gr.Markdown("## 一键运行完整流程")
             gr.Markdown("""
             ### 流程说明
             1. 提取PDF文档
-            2. 清洗论文内容
-            3. 分析论文（翻译、推导）
-            4. 生成创新想法
-            5. 筛选最优想法
-            6. 详细化想法
-            7. 生成代码实现
+            2. 创建论文集合
+            3. 清洗论文内容
+            4. 分析论文（DeepSeek）
+            5. 生成创新想法（DeepSeek）
+            6. 筛选最优想法
+            7. 详细化想法（Gemini/Claude）
+            8. 生成代码实现（Claude）
             
             ⚠️ **注意**: 完整流程可能需要较长时间（取决于论文数量和API速度）
             """)
