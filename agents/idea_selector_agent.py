@@ -108,8 +108,8 @@ class IdeaSelectorAgent(BaseAgent):
         """
         ideas = []
         
-        # 按 ### Idea 分割
-        idea_blocks = re.split(r'###\s+Idea\s+\d+:', content)
+        # 按 ### Idea 或 ### **Idea 分割（兼容不同格式）
+        idea_blocks = re.split(r'###\s+\*{0,2}\s*Idea\s+\d+:', content)
         
         for block in idea_blocks[1:]:  # 跳过第一个空块
             if not block.strip():
