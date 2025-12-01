@@ -386,45 +386,66 @@ def view_analysis(paper_key):
 
 # ==================== 想法生成 ====================
 
-def generate_ideas(min_score, progress=gr.Progress()):
-    """生成创新想法"""
+def generate_ideas(progress=gr.Progress()):
+    """生成创新想法 - 使用DeepSeek基于论文分析生成ideas"""
     try:
         progress(0.1, desc="初始化想法生成Agent...")
         
         # 生成想法
-        gen_agent = IdeaGeneratorAgent()
-        progress(0.3, desc="生成创新想法中...")
-        ideas = gen_agent.run()
-        
-        # 筛选想法
-        progress(0.6, desc="筛选最优想法...")
-        sel_agent = IdeaSelectorAgent()
-        best_idea = sel_agent.run(ideas)
+        agent = IdeaGeneratorAgent()
+        progress(0.3, desc="使用DeepSeek生成创新想法中（可能需要1-2分钟）...")
+        ideas_text = agent.run()
         
         progress(1.0, desc="完成！")
         
-        # 格式化输出
-        output = f"✅ 生成了 {len(ideas)} 个创新想法\n\n"
-        output += "="*60 + "\n"
-        output += "🏆 最优想法\n"
-        output += "="*60 + "\n\n"
-        output += f"标题: {best_idea['title']}\n"
-        output += f"创新性评分: {best_idea['score']}/100\n"
-        output += f"来源论文: {', '.join(best_idea.get('source_papers', []))}\n\n"
-        output += f"描述:\n{best_idea['description']}\n\n"
+        if not ideas_text:
+            return "❌ 没有找到论文分析结果\n请先执行论文分析步骤"
         
-        output += "="*60 + "\n"
-        output += "📋 其他想法\n"
-        output += "="*60 + "\n\n"
+        # 生成报告
+        report = f"✅ 创新想法生成完成！\n\n"
+        report += "=" * 60 + "\n"
+        report += "📊 生成统计\n"
+        report += "=" * 60 + "\n\n"
+        report += f"输出长度: {len(ideas_text):,} 字符\n"
+        report += f"包含评分: {'是' if '评分' in ideas_text or '分' in ideas_text else '否'}\n\n"
+        report += "=" * 60 + "\n"
+        report += "保存位置:\n"
+        report += "  • 想法文件: data/ideas/generated_ideas.md\n\n"
+        report += "=" * 60 + "\n"
+        report += "📋 生成的想法预览\n"
+        report += "=" * 60 + "\n\n"
         
-        for i, idea in enumerate(ideas[:5], 1):
-            if idea != best_idea:
-                output += f"{i}. {idea['title']} (评分: {idea['score']})\n"
+        # 显示前500字符
+        preview_length = 500
+        if len(ideas_text) > preview_length:
+            report += ideas_text[:preview_length] + "\n\n... (还有更多内容)"
+        else:
+            report += ideas_text
         
-        return output
+        return report
         
     except Exception as e:
-        return f"❌ 生成想法失败: {str(e)}"
+        import traceback
+        return f"❌ 生成想法失败: {str(e)}\n\n{traceback.format_exc()}"
+
+
+def view_ideas():
+    """查看生成的想法"""
+    try:
+        from pathlib import Path
+        
+        ideas_file = Path("data/ideas/generated_ideas.md")
+        
+        if not ideas_file.exists():
+            return "❌ 未找到生成的想法\n\n请先执行想法生成"
+        
+        with open(ideas_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return f"# 💡 生成的创新想法\n\n{content}"
+        
+    except Exception as e:
+        return f"❌ 读取失败: {str(e)}"
 
 
 # ==================== 想法详细化 ====================
@@ -879,32 +900,43 @@ def create_ui():
         
         # ==================== Tab 4: 想法生成 ====================
         with gr.Tab("💡 想法生成"):
-            gr.Markdown("## 创新想法生成与详细化")
+            gr.Markdown("## 创新想法生成（DeepSeek）")
+            gr.Markdown("""
+            基于论文分析结果，生成创新性强的研究想法
+            
+            **输入格式**：
+            ```
+            【Paper_1】论文名：分析内容...
+            【Paper_2】论文名：分析内容...
+            【Paper_3】论文名：分析内容...
+            ```
+            
+            **生成内容**：
+            - 多个创新想法（详细描述）
+            - 创新性评分（0-100分）
+            - 按评分从高到低排序
+            """)
             
             with gr.Row():
                 with gr.Column():
-                    gr.Markdown("### 3️⃣ 生成创新想法")
-                    min_score = gr.Slider(
-                        label="最低分数阈值",
-                        minimum=0,
-                        maximum=100,
-                        value=60,
-                        step=5
+                    gr.Markdown("### 1️⃣ 生成创新想法")
+                    generate_btn = gr.Button("💡 生成想法", variant="primary", size="lg")
+                    ideas_output = gr.Textbox(label="生成结果", lines=20)
+                    
+                    generate_btn.click(
+                        fn=generate_ideas,
+                        outputs=ideas_output
                     )
-                    generate_btn = gr.Button("💡 生成想法", variant="primary")
-                    ideas_output = gr.Textbox(label="生成的想法", lines=15)
                 
                 with gr.Column():
-                    gr.Markdown("### 4️⃣ 详细化想法")
-                    detail_btn = gr.Button("📝 详细化最优想法", variant="primary")
-                    detail_output = gr.Textbox(label="详细化结果", lines=15)
-            
-            generate_btn.click(
-                fn=generate_ideas,
-                inputs=[min_score],
-                outputs=ideas_output
-            )
-            detail_btn.click(fn=detail_idea, outputs=detail_output)
+                    gr.Markdown("### 2️⃣ 查看完整想法")
+                    view_ideas_btn = gr.Button("👁️ 查看想法", variant="secondary", size="lg")
+                    ideas_viewer = gr.Markdown(label="想法内容")
+                    
+                    view_ideas_btn.click(
+                        fn=view_ideas,
+                        outputs=ideas_viewer
+                    )
         
         # ==================== Tab 5: 代码生成 ====================
         with gr.Tab("💻 代码生成"):
