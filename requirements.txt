@@ -1,5 +1,7 @@
 # AgentColab项目依赖包
 
+aider-chat
+
 # Google Gemini API
 google-generativeai>=0.3.0
 
@@ -21,6 +23,17 @@ gradio>=4.0.0
 # 数据处理
 numpy>=1.24.0
 scipy>=1.10.0
+
+# 绘图和可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+pandas>=2.0.0
+
+# Git操作
+GitPython>=3.1.0
+
+# 代码执行和重试
+tenacity>=8.2.0
 
 # 其他工具
 python-dotenv>=1.0.0

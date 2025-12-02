@@ -5,6 +5,7 @@ API客户端封装模块
 
 import os
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from anthropic import Anthropic
 from openai import OpenAI
 from typing import Optional, Dict, Any, List
@@ -50,12 +51,21 @@ class GeminiClient:
             生成的文本
         """
         try:
+            # 强制关闭安全过滤（使用正确的枚举类型）
+            safety_settings = {
+                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+            }
+            
             model = genai.GenerativeModel(
                 self.model_name,
-                generation_config=self.generation_config
+                generation_config=self.generation_config,
+                safety_settings=safety_settings  # 强制关闭安全过滤
             )
             
-            logger.info(f"调用Gemini API，模型: {self.model_name}")
+            logger.info(f"调用Gemini API，模型: {self.model_name}，安全过滤: 已强制关闭（BLOCK_NONE）")
             
             if stream:
                 response = model.generate_content(prompt, stream=True)
@@ -207,12 +217,19 @@ class GptsApiClient:
             
             logger.info(f"调用GptsApi (Gemini)，模型: {self.model}")
             
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens
-            )
+            # 构建请求参数
+            request_params = {
+                "model": self.model,
+                "messages": messages,
+                "max_tokens": self.max_tokens
+            }
+            
+            # 某些模型（如gpt-5）只支持默认temperature=1，不支持自定义
+            # 如果temperature不是1，则尝试传递；如果是1或接近1，则不传递（使用默认值）
+            if self.temperature is not None and abs(self.temperature - 1.0) > 0.01:
+                request_params["temperature"] = self.temperature
+            
+            response = self.client.chat.completions.create(**request_params)
             
             return response.choices[0].message.content
             

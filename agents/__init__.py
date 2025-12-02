@@ -10,6 +10,7 @@ from agents.idea_generator_agent import IdeaGeneratorAgent
 from agents.idea_selector_agent import IdeaSelectorAgent
 from agents.idea_detailer_agent import IdeaDetailerAgent
 from agents.code_generator_agent import CodeGeneratorAgent
+from agents.supervisor_agent import SupervisorAgent
 
 __all__ = [
     'BaseAgent',
@@ -19,6 +20,7 @@ __all__ = [
     'IdeaGeneratorAgent',
     'IdeaSelectorAgent',
     'IdeaDetailerAgent',
-    'CodeGeneratorAgent'
+    'CodeGeneratorAgent',
+    'SupervisorAgent'
 ]
 

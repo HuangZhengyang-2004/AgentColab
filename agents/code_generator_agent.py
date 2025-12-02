@@ -1,129 +1,541 @@
 """
-代码生成Agent
-负责调用Claude API根据详细化的idea生成Python代码实现
+代码生成Agent - 使用Aider自动生成和调试代码
 """
+import os
+import sys
+import subprocess
+import json
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, Optional, Tuple
+import traceback
 
 from agents.base_agent import BaseAgent
-from utils.api_client import UnifiedLLMClient
-from config.prompts import prompts
+from utils.config_loader import config_loader
 
 
 class CodeGeneratorAgent(BaseAgent):
-    """代码生成Agent - 可配置使用不同的LLM"""
+    """
+    代码生成Agent
     
-    def __init__(self, api_provider: str = None, model: str = None):
-        """
-        初始化代码生成Agent
-        
-        Args:
-            api_provider: API提供商，None则从配置读取
-            model: 模型名称，None则从配置读取
-        """
+    功能：
+    1. 读取详细化的idea
+    2. 使用aider-chat生成Python代码
+    3. 自动运行代码
+    4. 如果报错 -> 提交到GitHub并记录
+    5. 如果成功 -> 生成指标表和图表
+    """
+    
+    def __init__(self):
         super().__init__("代码生成Agent")
         
-        # 从配置读取API设置
-        if api_provider is None:
-            api_provider = self.config_loader.get('pipeline.code_generation.api_provider', 'claude')
-        if model is None:
-            model = self.config_loader.get('pipeline.code_generation.model', 'claude-3-5-sonnet-20241022')
+        # 加载配置
+        pipeline_config = self.config_loader.config.get('pipeline', {})
+        code_gen_config = pipeline_config.get('code_generation', {})
         
-        temperature = self.config_loader.get('pipeline.code_generation.temperature', 0.3)
-        max_tokens = self.config_loader.get('pipeline.code_generation.max_tokens', 4096)
+        self.api_provider = code_gen_config.get('api_provider', 'deepseek')
+        self.model = code_gen_config.get('model', 'deepseek-chat')
+        self.temperature = code_gen_config.get('temperature', 0.7)
+        self.max_tokens = code_gen_config.get('max_tokens', 4096)
         
-        self.llm_client = UnifiedLLMClient(
-            api_provider=api_provider,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens
-        )
+        # 目录配置
+        dirs = self.config_loader.config.get('directories', {})
+        self.code_dir = Path(dirs.get('code', 'data/code'))
+        self.ideas_dir = Path(dirs.get('ideas', 'data/ideas'))
+        self.logs_dir = Path('logs')
         
-        self.logger.info(f"使用 {api_provider} API, 模型: {model}")
+        # 创建必要的目录
+        self.code_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Aider配置
+        self.aider_model_map = {
+            'deepseek': 'deepseek/deepseek-chat',
+            'gemini': 'gemini/gemini-2.5-flash',
+            'claude': 'claude-3-5-sonnet-20241022',
+            'gptsapi': 'gpt-5'
+        }
     
-    def run(self, detailed_idea: str = None) -> str:
+    def run(self, detailed_idea_path: str = None, max_iterations: int = 3) -> Dict:
         """
-        生成Python代码
+        运行代码生成流程（支持自动调试迭代）
         
         Args:
-            detailed_idea: 详细化的idea文章，如果为None则从文件读取
+            detailed_idea_path: 详细化idea的文件路径
+            max_iterations: 最大迭代次数（默认3次）
             
         Returns:
-            生成的Python代码
+            包含生成结果的字典
         """
-        self.log_start("生成Python代码实现")
+        self.log_start("代码生成")
         
         try:
-            # 如果未提供详细idea，则从文件读取
-            if detailed_idea is None:
-                detailed_idea = self._load_detailed_idea()
+            # 1. 加载详细化的idea
+            if not detailed_idea_path:
+                detailed_idea_path = self.ideas_dir / "detailed_idea.md"
             
-            if not detailed_idea:
-                raise ValueError("未找到详细化的idea")
+            self.logger.info(f"加载详细化idea: {detailed_idea_path}")
+            idea_content = self._load_detailed_idea(detailed_idea_path)
             
-            # 调用Claude API生成代码
-            self.logger.info("正在生成代码...")
-            code = self._generate_code(detailed_idea)
+            # 迭代历史
+            iterations = []
+            current_prompt = self._prepare_aider_prompt(idea_content)
             
-            # 保存代码
-            self.save_result(
-                code,
-                'generated_implementation.py',
-                'code',
-                format='text'
-            )
+            # 2. 迭代生成和调试
+            for iteration in range(1, max_iterations + 1):
+                self.logger.info(f"\n{'='*60}")
+                self.logger.info(f"🔄 迭代 {iteration}/{max_iterations}")
+                self.logger.info(f"{'='*60}")
+                
+                # 生成代码
+                self.logger.info("使用LLM生成代码...")
+                code_result = self._generate_code_with_aider(current_prompt)
+                
+                if not code_result['success']:
+                    self.logger.error(f"代码生成失败: {code_result['error']}")
+                    iterations.append({
+                        'iteration': iteration,
+                        'stage': 'generation_failed',
+                        'error': code_result['error']
+                    })
+                    break
+                
+                # 运行代码
+                self.logger.info("运行生成的代码...")
+                run_result = self._run_generated_code(code_result['code_file'])
+                
+                # 记录本次迭代
+                iteration_info = {
+                    'iteration': iteration,
+                    'code_file': str(code_result['code_file']),
+                    'success': run_result['success']
+                }
+                
+                if run_result['success']:
+                    # 成功！
+                    self.logger.info(f"✅ 迭代{iteration}: 代码运行成功！")
+                    iteration_info.update({
+                        'stage': 'completed',
+                        'output': run_result['output'],
+                        'metrics_file': run_result.get('metrics_file'),
+                        'figures': run_result.get('figures', [])
+                    })
+                    iterations.append(iteration_info)
+                    
+                    # 保存结果
+                    result = {
+                        'success': True,
+                        'iterations': iterations,
+                        'final_iteration': iteration,
+                        **iteration_info
+                    }
+                    self._save_result(result)
+                    self.log_end("代码生成完成")
+                    return result
+                
+                else:
+                    # 失败，尝试调试
+                    self.logger.error(f"❌ 迭代{iteration}: 代码运行失败")
+                    error_output = run_result['error']
+                    
+                    iteration_info.update({
+                        'stage': 'execution_failed',
+                        'error': error_output
+                    })
+                    
+                    # 记录错误日志
+                    log_result = self._submit_to_github(
+                        code_result['code_file'],
+                        error_output
+                    )
+                    iteration_info['error_log'] = log_result.get('error_log')
+                    
+                    iterations.append(iteration_info)
+                    
+                    # 如果还有迭代次数，尝试调试修复
+                    if iteration < max_iterations:
+                        self.logger.info(f"🔧 尝试自动修复（剩余{max_iterations - iteration}次机会）...")
+                        
+                        # 使用DebugAgent分析错误
+                        from agents.debug_agent import DebugAgent
+                        debug_agent = DebugAgent()
+                        
+                        error_analysis = debug_agent.analyze_error(
+                            code_result['code_file'],
+                            error_output
+                        )
+                        
+                        # 如果可自动修复，生成新的prompt
+                        if error_analysis['auto_fixable']:
+                            self.logger.info(f"✅ 错误可自动修复: {error_analysis['fix_strategy']}")
+                            
+                            # 准备修复提示词
+                            current_prompt = self._prepare_fix_prompt(
+                                idea_content,
+                                code_result['code_file'],
+                                error_analysis
+                            )
+                        else:
+                            self.logger.warning("⚠️  错误需要人工介入，停止迭代")
+                            break
+                    else:
+                        self.logger.warning(f"⚠️  已达到最大迭代次数({max_iterations})，停止尝试")
             
-            self.logger.info(f"✓ 代码生成完成，长度: {len(code)} 字符")
-            self.log_end("生成Python代码实现")
-            
-            return code
+            # 所有迭代都失败了
+            result = {
+                'success': False,
+                'iterations': iterations,
+                'final_iteration': len(iterations),
+                'error': '所有迭代都未能成功运行代码',
+                'stage': 'max_iterations_reached'
+            }
+            self._save_result(result)
+            self.log_end("代码生成完成（未成功）")
+            return result
             
         except Exception as e:
-            self.log_error(f"生成代码失败: {str(e)}")
+            self.log_error(f"代码生成失败: {str(e)}")
+            self.logger.error(traceback.format_exc())
             raise
     
-    def _load_detailed_idea(self) -> str:
-        """
-        加载详细化的idea
+    def _load_detailed_idea(self, idea_path: Path) -> str:
+        """加载详细化的idea"""
+        if not Path(idea_path).exists():
+            raise FileNotFoundError(f"未找到详细化idea文件: {idea_path}")
         
-        Returns:
-            详细化的idea文本
-        """
-        try:
-            detailed_idea = self.file_manager.load_text('detailed_idea.txt', 'ideas')
-            self.logger.info(f"加载详细化idea，长度: {len(detailed_idea)} 字符")
-            return detailed_idea
-        except Exception as e:
-            self.log_error(f"加载详细化idea失败: {str(e)}")
-            return ""
+        with open(idea_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        self.logger.info(f"成功加载idea，长度: {len(content)} 字符")
+        return content
     
-    def _generate_code(self, idea_detail: str) -> str:
+    def _prepare_aider_prompt(self, idea_content: str) -> str:
         """
-        调用Claude生成代码
+        准备Aider提示词
         
         Args:
-            idea_detail: 详细化的idea
+            idea_content: 详细化的idea内容
             
         Returns:
-            生成的代码
+            完整的提示词
         """
-        prompt = prompts.format_prompt(
-            prompts.CODE_GENERATION,
-            idea_detail=idea_detail
-        )
-        
-        system_prompt = """你是一个专业的Python开发工程师，擅长将学术论文中的算法转化为高质量的代码实现。
-你的代码应该：
-1. 结构清晰，模块化设计
-2. 包含详细的注释和文档字符串
-3. 遵循PEP 8编码规范
-4. 使用类型提示
-5. 包含错误处理
-6. 可以直接运行
-"""
-        
-        result = self.llm_client.generate(
-            prompt=prompt,
-            system_prompt=system_prompt
-        )
-        
-        return result
+        prompt = f"""这是我的一个idea产生的文章，请根据这篇文章帮我用python完整复现一下去产生相应可运行的代码。
 
+要求：
+1. 代码必须是完整的、可运行的Python脚本
+2. 包含所有必要的import语句
+3. 实现文章中描述的核心算法和方法
+4. 生成评价指标（如准确率、F1分数、MSE等）
+5. 使用matplotlib绘制评价指标的图表
+6. 将指标保存到JSON文件（metrics.json）
+7. 将图表保存为PNG文件（figure_*.png）
+8. 代码要有详细的注释
+9. 使用try-except处理可能的错误
+10. 在最后打印"实验完成！"
+
+请直接生成代码，不要有多余的解释。
+
+---
+
+【Idea内容】
+
+{idea_content}
+
+---
+
+请开始生成代码。
+"""
+        return prompt
+    
+    def _prepare_fix_prompt(self, idea_content: str, failed_code_file: Path, error_analysis: Dict) -> str:
+        """
+        准备修复提示词
+        
+        Args:
+            idea_content: 详细化的idea内容
+            failed_code_file: 失败的代码文件
+            error_analysis: 错误分析结果
+            
+        Returns:
+            修复提示词
+        """
+        # 读取失败的代码
+        with open(failed_code_file, 'r', encoding='utf-8') as f:
+            failed_code = f.read()
+        
+        error_type = error_analysis['error_type']
+        error_details = error_analysis['error_details']
+        error_line = error_details.get('error_line', '未知')
+        error_message = error_details.get('error_message', '未知')
+        
+        prompt = f"""之前生成的代码存在{error_type}错误，请修复它。
+
+【错误信息】
+- 错误类型: {error_type}
+- 错误行号: {error_line}
+- 错误消息: {error_message}
+
+【失败的代码】
+```python
+{failed_code}
+```
+
+【原始需求】
+{idea_content}
+
+【修复要求】
+1. 修复上述错误
+2. 确保代码完整且可运行
+3. 保持原有功能不变
+4. 包含所有必要的import语句
+5. 生成评价指标并保存到metrics.json
+6. 绘制图表并保存为PNG文件
+7. 在最后打印"实验完成！"
+
+请直接输出修复后的完整代码，不要有任何解释。
+"""
+        return prompt
+    
+    def _generate_code_with_aider(self, prompt: str) -> Dict:
+        """
+        使用LLM直接生成代码（不使用Aider CLI，因为其在某些环境下不稳定）
+        
+        Args:
+            prompt: 提示词
+            
+        Returns:
+            生成结果字典
+        """
+        try:
+            from utils.api_client import get_llm_client
+            
+            # 准备输出文件
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            code_file = self.code_dir / f"generated_code_{timestamp}.py"
+            
+            # 初始化LLM客户端
+            self.logger.info(f"使用LLM生成代码: {self.api_provider}/{self.model}")
+            llm_client = get_llm_client(
+                api_provider=self.api_provider,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+            
+            # 系统提示词
+            system_prompt = """你是一个专业的Python代码生成专家。
+根据用户提供的研究方案，生成完整的、可运行的Python代码。
+
+要求：
+1. 只输出Python代码，不要有任何解释性文字
+2. 代码必须完整且可直接运行
+3. 包含所有必要的import语句
+4. 使用try-except处理错误
+5. 生成评价指标并保存到metrics.json
+6. 使用matplotlib绘制图表并保存为PNG
+7. 在最后打印"实验完成！"
+
+直接输出代码，以```python开始，以```结束。"""
+            
+            # 调用LLM生成代码
+            self.logger.info("正在调用LLM生成代码...")
+            response = llm_client.generate(
+                prompt=prompt,
+                system_prompt=system_prompt
+            )
+            
+            # 提取代码块
+            code = self._extract_code_from_response(response)
+            
+            if not code:
+                return {
+                    'success': False,
+                    'error': 'LLM未生成有效的代码块'
+                }
+            
+            # 保存代码到文件
+            with open(code_file, 'w', encoding='utf-8') as f:
+                f.write(code)
+            
+            self.logger.info(f"✅ 代码生成成功: {code_file}")
+            self.logger.info(f"代码长度: {len(code)} 字符")
+            
+            return {
+                'success': True,
+                'code_file': code_file,
+                'llm_response': response[:500]  # 保存前500字符
+            }
+            
+        except Exception as e:
+            self.logger.error(f"代码生成异常: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _extract_code_from_response(self, response: str) -> str:
+        """
+        从LLM响应中提取代码块
+        
+        Args:
+            response: LLM的响应文本
+            
+        Returns:
+            提取的Python代码（不含markdown标记）
+        """
+        import re
+        
+        # 尝试提取```python ... ```代码块
+        code_blocks = re.findall(r'```python\n(.*?)```', response, re.DOTALL)
+        if code_blocks:
+            code = code_blocks[0].strip()
+            self.logger.info(f"✅ 从```python块提取代码，长度: {len(code)}")
+            return code
+        
+        # 尝试提取``` ... ```代码块（不带语言标记）
+        code_blocks = re.findall(r'```\n(.*?)```', response, re.DOTALL)
+        if code_blocks:
+            code = code_blocks[0].strip()
+            self.logger.info(f"✅ 从```块提取代码，长度: {len(code)}")
+            return code
+        
+        # 如果响应以```python开头但没有结束标记，移除开头的标记
+        if response.startswith('```python'):
+            code = response.replace('```python\n', '', 1).replace('```python', '', 1)
+            # 移除可能的结尾```
+            if code.endswith('```'):
+                code = code.rsplit('```', 1)[0]
+            code = code.strip()
+            self.logger.info(f"✅ 移除markdown标记后提取代码，长度: {len(code)}")
+            return code
+        
+        # 如果响应以```开头，移除标记
+        if response.startswith('```'):
+            code = response.replace('```\n', '', 1).replace('```', '', 1)
+            if code.endswith('```'):
+                code = code.rsplit('```', 1)[0]
+            code = code.strip()
+            self.logger.info(f"✅ 移除```标记后提取代码，长度: {len(code)}")
+            return code
+        
+        # 如果没有代码块标记，检查是否整个响应都是代码
+        if 'import ' in response and ('def ' in response or 'class ' in response or 'if __name__' in response):
+            code = response.strip()
+            self.logger.info(f"✅ 直接使用响应作为代码，长度: {len(code)}")
+            return code
+        
+        self.logger.warning("⚠️ 无法从响应中提取有效代码")
+        return ""
+    
+    def _run_generated_code(self, code_file: Path) -> Dict:
+        """
+        运行生成的代码
+        
+        Args:
+            code_file: 代码文件路径
+            
+        Returns:
+            运行结果字典
+        """
+        try:
+            self.logger.info(f"运行代码: {code_file}")
+            
+            # 转换为绝对路径
+            abs_code_file = Path(code_file).resolve()
+            abs_code_dir = abs_code_file.parent
+            
+            self.logger.info(f"工作目录: {abs_code_dir}")
+            self.logger.info(f"代码文件（绝对路径）: {abs_code_file}")
+            
+            # 运行代码
+            result = subprocess.run(
+                [sys.executable, str(abs_code_file)],
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5分钟超时
+                cwd=str(abs_code_dir)  # 在代码目录下运行
+            )
+            
+            # 记录输出
+            self.logger.info(f"代码输出:\n{result.stdout}")
+            
+            if result.returncode != 0:
+                self.logger.error(f"代码执行失败:\n{result.stderr}")
+                return {
+                    'success': False,
+                    'error': result.stderr,
+                    'output': result.stdout
+                }
+            
+            # 检查生成的文件
+            metrics_file = code_file.parent / "metrics.json"
+            figures = list(code_file.parent.glob("figure_*.png"))
+            
+            return {
+                'success': True,
+                'output': result.stdout,
+                'metrics_file': str(metrics_file) if metrics_file.exists() else None,
+                'figures': [str(f) for f in figures]
+            }
+            
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'error': '代码执行超时（5分钟）'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _submit_to_github(self, code_file: Path, error: str) -> Dict:
+        """
+        记录错误日志（不提交到GitHub，只保存本地）
+        
+        Args:
+            code_file: 代码文件路径
+            error: 错误信息
+            
+        Returns:
+            日志记录结果
+        """
+        try:
+            # 创建错误日志文件
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            error_log = self.logs_dir / f"code_error_{timestamp}.log"
+            
+            with open(error_log, 'w', encoding='utf-8') as f:
+                f.write(f"代码文件: {code_file}\n")
+                f.write(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"\n错误信息:\n{error}\n")
+            
+            self.logger.info(f"✅ 错误日志已保存: {error_log}")
+            
+            return {
+                'success': True,
+                'error_log': str(error_log),
+                'message': '错误日志已保存到本地'
+            }
+                
+        except Exception as e:
+            self.logger.error(f"保存错误日志失败: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def _save_result(self, result: Dict):
+        """保存生成结果"""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        result_file = self.code_dir / f"generation_result_{timestamp}.json"
+        
+        # 添加时间戳
+        result['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        self.logger.info(f"结果已保存: {result_file}")

@@ -77,3 +77,4 @@ config.yaml
 
 # 保留配置示例（不含密钥）
 !config.example.yaml
+.aider*

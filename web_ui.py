@@ -16,7 +16,8 @@ from agents import (
     IdeaGeneratorAgent,
     IdeaSelectorAgent,
     IdeaDetailerAgent,
-    CodeGeneratorAgent
+    CodeGeneratorAgent,
+    SupervisorAgent
 )
 from utils.config_loader import config_loader
 from utils.logger import logger
@@ -591,15 +592,132 @@ def generate_code(progress=gr.Progress()):
         progress(0.1, desc="初始化代码生成Agent...")
         agent = CodeGeneratorAgent()
         
-        progress(0.3, desc="生成代码中...")
-        code = agent.run()
+        progress(0.3, desc="使用Aider生成代码...")
+        result = agent.run()
         
-        progress(1.0, desc="代码生成完成！")
+        if not result['success']:
+            progress(1.0, desc="代码生成失败")
+            return f"❌ 代码生成失败\n\n阶段: {result.get('stage', 'unknown')}\n错误: {result.get('error', 'unknown')}"
         
-        return code
+        # 检查是否成功运行
+        if result['stage'] == 'completed':
+            progress(0.8, desc="代码运行成功！启动监督评价...")
+            
+            # 自动调用监督Agent
+            supervisor = SupervisorAgent()
+            eval_result = supervisor.run(
+                metrics_file=result.get('metrics_file'),
+                code_file=result.get('code_file')
+            )
+            
+            progress(1.0, desc="完成！")
+            
+            output = f"""✅ 代码生成并运行成功！
+
+📁 代码文件: {result['code_file']}
+📊 指标文件: {result.get('metrics_file', '未生成')}
+📈 图表数量: {len(result.get('figures', []))}
+
+{'='*60}
+【代码输出】
+{'='*60}
+{result['output']}
+
+{'='*60}
+【监督评价】
+{'='*60}
+{eval_result.get('evaluation', '评价失败') if eval_result['success'] else '评价失败'}
+"""
+            return output
+        
+        else:
+            # 代码运行失败
+            progress(1.0, desc="代码运行失败")
+            output = f"""❌ 代码运行失败
+
+📁 代码文件: {result['code_file']}
+🐛 错误信息:
+{result.get('error', 'unknown')}
+
+{'='*60}
+已提交到GitHub: {result.get('github_issue', '未提交')}
+"""
+            return output
         
     except Exception as e:
-        return f"❌ 代码生成失败: {str(e)}"
+        logger.error(f"代码生成失败: {str(e)}")
+        import traceback
+        return f"❌ 代码生成失败: {str(e)}\n\n{traceback.format_exc()}"
+
+
+def supervise_metrics(progress=gr.Progress()):
+    """监督评价指标"""
+    try:
+        progress(0.3, desc="初始化监督Agent...")
+        agent = SupervisorAgent()
+        
+        progress(0.6, desc="评价指标中...")
+        result = agent.run()
+        
+        if not result['success']:
+            return f"❌ 评价失败: {result.get('error', 'unknown')}"
+        
+        progress(1.0, desc="评价完成！")
+        
+        output = f"""✅ 监督评价完成！
+
+📊 指标文件: {result['metrics_file']}
+📁 代码文件: {result.get('code_file', '未指定')}
+⏰ 时间: {result['timestamp']}
+
+{'='*60}
+【评价内容】
+{'='*60}
+{result['evaluation']}
+"""
+        return output
+        
+    except Exception as e:
+        logger.error(f"监督评价失败: {str(e)}")
+        return f"❌ 监督评价失败: {str(e)}"
+
+
+def view_generated_code():
+    """查看生成的代码"""
+    try:
+        code_dir = Path('data/code')
+        code_files = sorted(code_dir.glob('generated_code_*.py'), key=lambda p: p.stat().st_mtime, reverse=True)
+        
+        if not code_files:
+            return "未找到生成的代码文件"
+        
+        latest_code = code_files[0]
+        with open(latest_code, 'r', encoding='utf-8') as f:
+            code = f.read()
+        
+        return f"# {latest_code.name}\n\n```python\n{code}\n```"
+        
+    except Exception as e:
+        return f"❌ 读取代码失败: {str(e)}"
+
+
+def view_evaluation():
+    """查看最新的评价报告"""
+    try:
+        code_dir = Path('data/code')
+        eval_files = sorted(code_dir.glob('evaluation_*.md'), key=lambda p: p.stat().st_mtime, reverse=True)
+        
+        if not eval_files:
+            return "未找到评价报告"
+        
+        latest_eval = eval_files[0]
+        with open(latest_eval, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        return content
+        
+    except Exception as e:
+        return f"❌ 读取评价报告失败: {str(e)}"
 
 
 # ==================== 完整流程 ====================
@@ -1121,13 +1239,56 @@ def create_ui():
         
         # ==================== Tab 6: 代码生成 ====================
         with gr.Tab("💻 代码生成"):
-            gr.Markdown("## 代码实现生成")
-            gr.Markdown("### 1️⃣ 生成Python代码")
+            gr.Markdown("""
+            ## 🤖 Aider自动代码生成
             
-            code_btn = gr.Button("💻 生成代码", variant="primary", size="lg")
-            code_output = gr.Code(label="生成的代码", language="python", lines=20)
+            ### 工作流程
+            1. **读取详细化的Idea** → 从 `data/ideas/detailed_idea.md`
+            2. **Aider生成代码** → 使用AI自动编写Python代码
+            3. **自动运行代码** → 执行生成的代码
+            4. **结果处理**:
+               - ✅ **成功**: 生成指标表 + 图表 → 自动调用监督Agent评价
+               - ❌ **失败**: 提交到GitHub + 记录错误日志
             
-            code_btn.click(fn=generate_code, outputs=code_output)
+            ### ⚠️ 注意事项
+            - 需要先完成"想法详细化"步骤
+            - Aider会消耗较多token（根据代码复杂度）
+            - 代码执行超时时间：5分钟
+            - 生成的代码会保存在 `data/code/` 目录
+            """)
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 1️⃣ 生成并运行代码")
+                    code_btn = gr.Button("🚀 生成代码（Aider）", variant="primary", size="lg")
+                    code_output = gr.Textbox(label="执行结果", lines=25)
+                    
+                    code_btn.click(fn=generate_code, outputs=code_output)
+                
+                with gr.Column():
+                    gr.Markdown("### 2️⃣ 查看生成的代码")
+                    view_code_btn = gr.Button("👁️ 查看代码", variant="secondary", size="lg")
+                    code_viewer = gr.Markdown(label="代码内容")
+                    
+                    view_code_btn.click(fn=view_generated_code, outputs=code_viewer)
+            
+            gr.Markdown("---")
+            
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 3️⃣ 监督评价（手动触发）")
+                    gr.Markdown("如果需要重新评价最新的指标，可以手动触发监督Agent")
+                    supervise_btn = gr.Button("🔍 监督评价", variant="secondary", size="lg")
+                    supervise_output = gr.Textbox(label="评价结果", lines=20)
+                    
+                    supervise_btn.click(fn=supervise_metrics, outputs=supervise_output)
+                
+                with gr.Column():
+                    gr.Markdown("### 4️⃣ 查看评价报告")
+                    view_eval_btn = gr.Button("📊 查看报告", variant="secondary", size="lg")
+                    eval_viewer = gr.Markdown(label="评价报告")
+                    
+                    view_eval_btn.click(fn=view_evaluation, outputs=eval_viewer)
         
         # ==================== Tab 7: 完整流程 ====================
         with gr.Tab("🚀 完整流程"):

@@ -79,12 +79,9 @@ class IdeaDetailerAgent(BaseAgent):
                 self.logger.warning("未找到相关论文")
                 return ""
             
-            # 构建输入文本
-            input_text = self._format_input_for_llm(source_papers, best_idea)
-            
-            # 调用LLM详细化
-            self.logger.info("正在详细化想法...")
-            detailed_idea = self._detail_idea(input_text, len(source_papers))
+            # 调用LLM详细化（分步输入）
+            self.logger.info("正在详细化想法（分步输入模式）...")
+            detailed_idea = self._detail_idea(source_papers, best_idea, len(source_papers))
             
             # 保存结果
             self.save_result(
@@ -234,23 +231,123 @@ class IdeaDetailerAgent(BaseAgent):
         
         return formatted_text
     
-    def _detail_idea(self, input_text: str, n_papers: int) -> str:
+    def _detail_idea(self, formatted_papers: Dict[str, dict], best_idea: Dict, n_papers: int) -> str:
         """
-        调用LLM详细化想法
+        调用LLM详细化想法（分步输入）
         
         Args:
-            input_text: 格式化的输入文本
+            formatted_papers: {paper_key: {'name': ..., 'analysis': ...}}
+            best_idea: 最优想法信息
             n_papers: 论文数量
             
         Returns:
             详细化后的想法
         """
-        # 构建prompt（先说明任务，再给内容）
-        prompt = f"""我先给你{n_papers}篇文章，然后再给你根据这{n_papers}篇文章结合产生的idea，最后你把这个idea详细化，涉及公式和理论要进行推导。
+        self.logger.info("=" * 80)
+        self.logger.info("🚀 准备分步调用 LLM")
+        self.logger.info("=" * 80)
+        self.logger.info(f"API提供商: {self.llm_client.api_provider}")
+        self.logger.info(f"模型: {self.llm_client.model}")
+        self.logger.info(f"温度: {self.llm_client.temperature}")
+        self.logger.info(f"最大tokens: {self.llm_client.max_tokens}")
+        self.logger.info(f"输入方式: 分步输入（多轮对话）")
+        self.logger.info("")
+        
+        system_prompt = "你是研究方案详细化助手。我会分步给你提供论文分析和创新想法，请记住所有内容，最后根据我的要求生成详细的研究方案。"
+        
+        try:
+            # 步骤1: 任务说明
+            self.logger.info("=" * 80)
+            self.logger.info("📝 步骤1: 发送任务说明")
+            self.logger.info("=" * 80)
+            
+            task_prompt = f"""我先给你{n_papers}篇文章的分析内容，然后再给你根据这{n_papers}篇文章结合产生的创新想法，最后你把这个想法详细化，涉及公式和理论要进行推导。
 
-{input_text}
+现在开始，我会分{n_papers + 1}步给你内容：
+- 第1-{n_papers}步：逐篇给你论文分析
+- 第{n_papers + 1}步：给你创新想法并要求详细化
 
-要求：
+请先回复"好的，我准备好了，请开始"。"""
+            
+            self.logger.info(f"任务说明内容:")
+            self.logger.info("-" * 80)
+            self.logger.info(task_prompt)
+            self.logger.info("-" * 80)
+            self.logger.info("")
+            
+            response1 = self.llm_client.generate(
+                prompt=task_prompt,
+                system_prompt=system_prompt
+            )
+            
+            self.logger.info(f"✅ LLM响应: {response1[:200]}")
+            self.logger.info("")
+            
+            # 步骤2-n+1: 逐篇输入论文
+            sorted_keys = sorted(formatted_papers.keys(), 
+                               key=lambda x: int(x.split('_')[1]) if '_' in x else 0)
+            
+            for step_idx, paper_key in enumerate(sorted_keys, 1):
+                # 提取原始论文编号（保持与idea中一致）
+                original_paper_num = int(paper_key.split('_')[1]) if '_' in paper_key else step_idx
+                
+                self.logger.info("=" * 80)
+                self.logger.info(f"📝 步骤{step_idx + 1}: 发送 Paper_{original_paper_num}")
+                self.logger.info("=" * 80)
+                
+                paper_data = formatted_papers[paper_key]
+                name = paper_data.get('name', paper_key)
+                analysis = paper_data.get('analysis', '')
+                
+                paper_prompt = f"""【Paper_{original_paper_num}】{name}：
+
+{analysis}
+
+请回复"已收到Paper_{original_paper_num}"。"""
+                
+                self.logger.info(f"论文Key: {paper_key} → Paper_{original_paper_num}")
+                self.logger.info(f"论文名称: {name}")
+                self.logger.info(f"分析内容长度: {len(analysis)} 字符")
+                self.logger.info(f"分析内容预览: {analysis[:200]}...")
+                self.logger.info("")
+                
+                # 添加重试机制（针对500错误）
+                max_retries = 3
+                retry_delay = 2  # 秒
+                
+                for attempt in range(max_retries):
+                    try:
+                        response = self.llm_client.generate(
+                            prompt=paper_prompt,
+                            system_prompt=system_prompt
+                        )
+                        
+                        self.logger.info(f"✅ LLM响应: {response[:200]}")
+                        self.logger.info("")
+                        break  # 成功则跳出重试循环
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "500" in error_msg and attempt < max_retries - 1:
+                            self.logger.warning(f"⚠️  遇到500错误，{retry_delay}秒后重试 (第{attempt + 1}/{max_retries}次)")
+                            import time
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # 指数退避
+                        else:
+                            raise  # 最后一次重试失败或非500错误，抛出异常
+            
+            # 最后一步: 输入想法并要求详细化
+            self.logger.info("=" * 80)
+            self.logger.info(f"📝 步骤{n_papers + 2}: 发送创新想法并要求详细化")
+            self.logger.info("=" * 80)
+            
+            idea_content = best_idea.get('full_content', '')
+            
+            final_prompt = f"""【基于以上{n_papers}篇文章的创新想法】
+
+{idea_content}
+
+现在请你把这个想法详细化，要求：
 1. 直接输出详细化的内容，不要开场白
 2. 详细化应包含：
    - 研究背景与动机
@@ -262,49 +359,39 @@ class IdeaDetailerAgent(BaseAgent):
    - 可能的挑战与解决方案
 3. 使用Markdown格式
 4. 行间公式两边用两个美元符号显示公式（$$公式$$）
-5. 确保内容详实、逻辑清晰、可操作性强
-"""
-        
-        system_prompt = "你是研究方案详细化助手。基于提供的论文分析和创新想法，生成详细的研究方案，包含完整的公式推导。直接输出内容，不要客套话。"
-        
-        # 打印完整的输入信息
-        self.logger.info("=" * 80)
-        self.logger.info("🚀 准备调用 LLM")
-        self.logger.info("=" * 80)
-        self.logger.info(f"API提供商: {self.llm_client.api_provider}")
-        self.logger.info(f"模型: {self.llm_client.model}")
-        self.logger.info(f"温度: {self.llm_client.temperature}")
-        self.logger.info(f"最大tokens: {self.llm_client.max_tokens}")
-        self.logger.info("")
-        
-        self.logger.info("📝 System Prompt:")
-        self.logger.info("-" * 80)
-        self.logger.info(system_prompt)
-        self.logger.info("-" * 80)
-        self.logger.info("")
-        
-        self.logger.info("📝 User Prompt 统计:")
-        self.logger.info(f"   总字符数: {len(prompt)}")
-        self.logger.info(f"   总行数: {prompt.count(chr(10))}")
-        self.logger.info(f"   估算tokens: ~{len(prompt) // 2}")  # 粗略估算
-        self.logger.info("")
-        
-        self.logger.info("📝 User Prompt 完整内容:")
-        self.logger.info("=" * 80)
-        self.logger.info(prompt)
-        self.logger.info("=" * 80)
-        self.logger.info("")
-        
-        # 调用LLM
-        try:
-            self.logger.info("⏳ 正在调用 LLM...")
-            result = self.llm_client.generate(
-                prompt=prompt,
-                system_prompt=system_prompt
-            )
+5. 确保内容详实、逻辑清晰、可操作性强"""
+            
+            self.logger.info(f"想法标题: {best_idea.get('title', 'N/A')}")
+            self.logger.info(f"想法评分: {best_idea.get('score', 'N/A')}")
+            self.logger.info(f"想法内容长度: {len(idea_content)} 字符")
+            self.logger.info(f"想法内容预览: {idea_content[:200]}...")
+            self.logger.info("")
+            
+            # 添加重试机制（针对500错误）
+            max_retries = 3
+            retry_delay = 2
+            
+            for attempt in range(max_retries):
+                try:
+                    self.logger.info(f"⏳ 正在调用 LLM 生成详细化内容... (尝试 {attempt + 1}/{max_retries})")
+                    result = self.llm_client.generate(
+                        prompt=final_prompt,
+                        system_prompt=system_prompt
+                    )
+                    break  # 成功则跳出重试循环
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    if "500" in error_msg and attempt < max_retries - 1:
+                        self.logger.warning(f"⚠️  遇到500错误，{retry_delay}秒后重试")
+                        import time
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        raise
             
             self.logger.info("=" * 80)
-            self.logger.info("✅ LLM 调用成功")
+            self.logger.info("✅ LLM 详细化完成")
             self.logger.info("=" * 80)
             self.logger.info(f"响应长度: {len(result)} 字符")
             self.logger.info(f"响应预览（前500字符）:")
