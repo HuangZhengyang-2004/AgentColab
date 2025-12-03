@@ -175,6 +175,10 @@ class CodeGeneratorAgent(BaseAgent):
                                 code_result['code_file'],
                                 error_analysis
                             )
+                            
+                            # 增加温度参数以获得更多样化的输出
+                            self.temperature = min(0.9, self.temperature + 0.1 * iteration)
+                            self.logger.info(f"🌡️  调整温度参数: {self.temperature}")
                         else:
                             self.logger.warning("⚠️  错误需要人工介入，停止迭代")
                             break
@@ -249,7 +253,7 @@ class CodeGeneratorAgent(BaseAgent):
     
     def _prepare_fix_prompt(self, idea_content: str, failed_code_file: Path, error_analysis: Dict) -> str:
         """
-        准备修复提示词
+        准备修复提示词（优化版：只提供错误行附近代码）
         
         Args:
             idea_content: 详细化的idea内容
@@ -261,38 +265,62 @@ class CodeGeneratorAgent(BaseAgent):
         """
         # 读取失败的代码
         with open(failed_code_file, 'r', encoding='utf-8') as f:
-            failed_code = f.read()
+            failed_code_lines = f.readlines()
         
         error_type = error_analysis['error_type']
         error_details = error_analysis['error_details']
-        error_line = error_details.get('error_line', '未知')
+        error_line = error_details.get('error_line', 0)
         error_message = error_details.get('error_message', '未知')
         
-        prompt = f"""之前生成的代码存在{error_type}错误，请修复它。
+        # 提取错误行附近的代码（±10行）
+        context_lines = 10
+        start_line = max(0, error_line - context_lines - 1)
+        end_line = min(len(failed_code_lines), error_line + context_lines)
+        
+        error_context = ''.join(failed_code_lines[start_line:end_line])
+        
+        # 标记错误行
+        error_line_content = failed_code_lines[error_line - 1].rstrip() if error_line > 0 else "未知"
+        
+        prompt = f"""⚠️ 代码存在{error_type}错误，必须修复！
 
-【错误信息】
-- 错误类型: {error_type}
-- 错误行号: {error_line}
-- 错误消息: {error_message}
+【错误详情】
+错误类型: {error_type}
+错误行号: 第{error_line}行
+错误消息: {error_message}
+错误代码: {error_line_content}
 
-【失败的代码】
+【错误位置的代码上下文】（第{start_line + 1}行 到 第{end_line}行）
 ```python
-{failed_code}
+{error_context}
 ```
 
-【原始需求】
-{idea_content}
+【问题分析】
+第{error_line}行的代码有语法错误：{error_message}
 
 【修复要求】
-1. 修复上述错误
-2. 确保代码完整且可运行
-3. 保持原有功能不变
-4. 包含所有必要的import语句
-5. 生成评价指标并保存到metrics.json
-6. 绘制图表并保存为PNG文件
-7. 在最后打印"实验完成！"
+1. ⚠️ 必须修复第{error_line}行的{error_type}错误
+2. ⚠️ 不要只是复制原代码，必须真正修改错误部分
+3. 生成完整的、可运行的Python代码
+4. 保持原有功能和逻辑不变
+5. 包含所有必要的import语句
+6. 实现以下功能：
+   - 实现论文中的核心算法
+   - 生成评价指标并保存到metrics.json
+   - 使用matplotlib绘制图表并保存为PNG文件
+   - 在最后打印"实验完成！"
 
-请直接输出修复后的完整代码，不要有任何解释。
+【原始需求（简要）】
+{idea_content[:500]}...
+
+⚠️ 重要提示：
+- 这是第N次尝试，之前的代码都有相同的错误
+- 请仔细检查第{error_line}行，确保语法正确
+- 如果是括号/引号未闭合，请补全
+- 如果是缺少冒号，请添加
+- 如果是try块缺少except，请添加except块
+
+请直接输出修复后的完整代码，不要有任何解释文字。
 """
         return prompt
     
@@ -313,8 +341,8 @@ class CodeGeneratorAgent(BaseAgent):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             code_file = self.code_dir / f"generated_code_{timestamp}.py"
             
-            # 初始化LLM客户端
-            self.logger.info(f"使用LLM生成代码: {self.api_provider}/{self.model}")
+            # 初始化LLM客户端（每次都重新创建以使用最新的温度参数）
+            self.logger.info(f"使用LLM生成代码: {self.api_provider}/{self.model}, 温度: {self.temperature}")
             llm_client = get_llm_client(
                 api_provider=self.api_provider,
                 model=self.model,
