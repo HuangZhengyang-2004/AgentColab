@@ -24,6 +24,7 @@ wheels/
 venv/
 ENV/
 env/
+data/code/.code_venv/  # 代码运行专用venv环境
 
 # IDE
 .vscode/

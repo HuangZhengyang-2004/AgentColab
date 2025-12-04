@@ -48,6 +48,10 @@ class CodeGeneratorAgent(BaseAgent):
         self.code_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         
+        # 独立的代码运行环境（venv）
+        self.code_venv_dir = self.code_dir / ".code_venv"
+        self.code_venv_python = None  # 将在初始化时设置
+        
         # Aider配置
         self.aider_model_map = {
             'deepseek': 'deepseek/deepseek-chat',
@@ -55,6 +59,9 @@ class CodeGeneratorAgent(BaseAgent):
             'claude': 'claude-3-5-sonnet-20241022',
             'gptsapi': 'gpt-5'
         }
+        
+        # 初始化代码运行环境
+        self._setup_code_venv()
     
     def run(self, detailed_idea_path: str = None, max_iterations: int = 3) -> Dict:
         """
@@ -100,6 +107,17 @@ class CodeGeneratorAgent(BaseAgent):
                     })
                     break
                 
+                # 生成 requirements.txt
+                self.logger.info("生成依赖文件 requirements.txt...")
+                requirements_file = self._generate_requirements(code_result['code_file'])
+                if requirements_file:
+                    self.logger.info(f"✅ 依赖文件已生成: {requirements_file}")
+                    self.logger.info(f"📦 请运行以下命令安装依赖:")
+                    self.logger.info(f"   pip install -r {requirements_file}")
+                    code_result['requirements_file'] = requirements_file
+                else:
+                    self.logger.warning("⚠️ 未能生成 requirements.txt，请手动检查代码依赖")
+                
                 # 运行代码
                 self.logger.info("运行生成的代码...")
                 run_result = self._run_generated_code(code_result['code_file'])
@@ -108,6 +126,7 @@ class CodeGeneratorAgent(BaseAgent):
                 iteration_info = {
                     'iteration': iteration,
                     'code_file': str(code_result['code_file']),
+                    'requirements_file': str(code_result.get('requirements_file', '')),
                     'success': run_result['success']
                 }
                 
@@ -457,9 +476,159 @@ class CodeGeneratorAgent(BaseAgent):
         self.logger.warning("⚠️ 无法从响应中提取有效代码")
         return ""
     
+    def _setup_code_venv(self):
+        """
+        设置独立的代码运行环境（venv）
+        这个环境专门用于运行生成的代码，不会影响用户的conda环境
+        """
+        try:
+            # 确定 venv 的 Python 路径
+            if sys.platform == 'win32':
+                venv_python = self.code_venv_dir / "Scripts" / "python.exe"
+            else:
+                venv_python = self.code_venv_dir / "bin" / "python"
+            
+            # 如果 venv 不存在，创建它
+            if not self.code_venv_dir.exists() or not venv_python.exists():
+                self.logger.info(f"🔧 创建独立的代码运行环境: {self.code_venv_dir}")
+                self.logger.info(f"   这个环境专门用于运行生成的代码，不会影响您的conda环境")
+                
+                # 使用系统 Python3 创建 venv（不依赖当前环境）
+                import shutil
+                python3_cmd = shutil.which('python3') or shutil.which('python')
+                
+                if not python3_cmd:
+                    raise RuntimeError("未找到 python3 命令，无法创建虚拟环境")
+                
+                # 创建 venv
+                result = subprocess.run(
+                    [python3_cmd, '-m', 'venv', str(self.code_venv_dir)],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                
+                if result.returncode != 0:
+                    raise RuntimeError(f"创建虚拟环境失败: {result.stderr}")
+                
+                self.logger.info(f"✅ 虚拟环境创建成功")
+            
+            # 验证 venv Python 是否存在
+            if not venv_python.exists():
+                raise RuntimeError(f"虚拟环境Python不存在: {venv_python}")
+            
+            self.code_venv_python = venv_python.resolve()
+            self.logger.info(f"✅ 代码运行环境: {self.code_venv_python}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 设置代码运行环境失败: {str(e)}")
+            self.logger.warning(f"⚠️  将使用当前Python环境运行代码（可能影响您的conda环境）")
+            self.code_venv_python = sys.executable
+    
+    def _install_dependencies_to_venv(self, requirements_file: Path) -> bool:
+        """
+        将依赖安装到独立的 venv 环境中
+        
+        Args:
+            requirements_file: requirements.txt 文件路径
+            
+        Returns:
+            是否安装成功
+        """
+        if not self.code_venv_python or not self.code_venv_python.exists():
+            self.logger.error("代码运行环境未正确设置")
+            return False
+        
+        try:
+            self.logger.info(f"📦 正在安装依赖到代码运行环境...")
+            self.logger.info(f"   环境: {self.code_venv_python}")
+            self.logger.info(f"   依赖文件: {requirements_file}")
+            
+            # 确定 pip 路径
+            if sys.platform == 'win32':
+                venv_pip = self.code_venv_dir / "Scripts" / "pip"
+            else:
+                venv_pip = self.code_venv_dir / "bin" / "pip"
+            
+            # 先升级 pip
+            upgrade_result = subprocess.run(
+                [str(self.code_venv_python), '-m', 'pip', 'install', '--upgrade', 'pip', '-q'],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            
+            # 安装依赖
+            install_result = subprocess.run(
+                [str(self.code_venv_python), '-m', 'pip', 'install', '-r', str(requirements_file)],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5分钟超时
+            )
+            
+            if install_result.returncode != 0:
+                self.logger.error(f"❌ 依赖安装失败:")
+                self.logger.error(install_result.stderr)
+                return False
+            
+            self.logger.info(f"✅ 依赖安装成功")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"❌ 依赖安装超时（超过5分钟）")
+            return False
+        except Exception as e:
+            self.logger.error(f"❌ 安装依赖时出错: {str(e)}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return False
+    
+    def _get_python_executable(self) -> str:
+        """
+        获取用于运行代码的Python解释器路径
+        优先使用独立的代码运行环境（venv）
+        
+        Returns:
+            Python解释器的绝对路径
+        """
+        # 优先使用独立的代码运行环境
+        if self.code_venv_python and self.code_venv_python.exists():
+            python_exe = str(self.code_venv_python)
+            self.logger.info(f"✅ 使用独立的代码运行环境: {python_exe}")
+            self.logger.info(f"   此环境不会影响您的conda环境")
+        else:
+            # 回退到当前环境
+            python_exe = sys.executable
+            self.logger.warning(f"⚠️  使用当前Python环境: {python_exe}")
+            if 'conda' in python_exe or 'envs' in python_exe:
+                self.logger.warning(f"   注意：这可能会在您的conda环境中安装依赖")
+        
+        return python_exe
+    
+    def _check_module_installed(self, module_name: str, python_exe: str) -> bool:
+        """
+        检查模块是否已安装
+        
+        Args:
+            module_name: 模块名称
+            python_exe: Python解释器路径
+            
+        Returns:
+            是否已安装
+        """
+        try:
+            result = subprocess.run(
+                [python_exe, '-c', f'import {module_name}'],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except:
+            return False
+    
     def _run_generated_code(self, code_file: Path) -> Dict:
         """
-        运行生成的代码
+        运行生成的代码（在当前的Python环境中运行）
         
         Args:
             code_file: 代码文件路径
@@ -477,23 +646,82 @@ class CodeGeneratorAgent(BaseAgent):
             self.logger.info(f"工作目录: {abs_code_dir}")
             self.logger.info(f"代码文件（绝对路径）: {abs_code_file}")
             
-            # 运行代码
+            # 获取Python解释器（使用当前环境的Python）
+            python_exe = self._get_python_executable()
+            
+            # 检查是否有requirements.txt，如果有则自动安装到独立的venv
+            requirements_file = code_file.parent / "requirements.txt"
+            if requirements_file.exists():
+                self.logger.info(f"📦 检测到依赖文件: {requirements_file}")
+                
+                # 自动安装依赖到独立的venv环境
+                if self.code_venv_python and self.code_venv_python.exists():
+                    # 检查依赖是否已安装
+                    with open(requirements_file, 'r', encoding='utf-8') as f:
+                        requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                    
+                    missing_deps = []
+                    for req in requirements:
+                        pkg_name = req.split('>=')[0].split('==')[0].split('<')[0].split('>')[0].strip()
+                        if not self._check_module_installed(pkg_name, python_exe):
+                            missing_deps.append(pkg_name)
+                    
+                    if missing_deps:
+                        self.logger.info(f"🔧 检测到缺失的依赖: {', '.join(missing_deps)}")
+                        self.logger.info(f"   正在自动安装到代码运行环境...")
+                        
+                        # 自动安装
+                        if self._install_dependencies_to_venv(requirements_file):
+                            self.logger.info(f"✅ 依赖安装完成，可以运行代码了")
+                        else:
+                            self.logger.error(f"❌ 依赖安装失败，代码可能无法运行")
+                            self.logger.error(f"   请手动运行: {python_exe} -m pip install -r {requirements_file}")
+                    else:
+                        self.logger.info(f"✅ 所有依赖已安装")
+                else:
+                    self.logger.warning(f"⚠️  代码运行环境未设置，无法自动安装依赖")
+                    self.logger.warning(f"   请手动运行: pip install -r {requirements_file}")
+            
+            # 运行代码（使用当前Python环境）
             result = subprocess.run(
-                [sys.executable, str(abs_code_file)],
+                [python_exe, str(abs_code_file)],
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5分钟超时
-                cwd=str(abs_code_dir)  # 在代码目录下运行
+                cwd=str(abs_code_dir),  # 在代码目录下运行
+                env=os.environ.copy()  # 继承当前环境变量（包括虚拟环境）
             )
             
             # 记录输出
             self.logger.info(f"代码输出:\n{result.stdout}")
             
             if result.returncode != 0:
-                self.logger.error(f"代码执行失败:\n{result.stderr}")
+                error_msg = result.stderr
+                self.logger.error(f"代码执行失败:\n{error_msg}")
+                
+                # 检查是否是模块缺失错误
+                if 'ModuleNotFoundError' in error_msg or 'ImportError' in error_msg:
+                    # 提取缺失的模块名
+                    import re
+                    module_match = re.search(r"No module named ['\"]([^'\"]+)['\"]", error_msg)
+                    if module_match:
+                        missing_module = module_match.group(1)
+                        self.logger.error(f"\n{'='*60}")
+                        self.logger.error(f"❌ 缺少依赖模块: {missing_module}")
+                        self.logger.error(f"{'='*60}")
+                        self.logger.error(f"📦 请运行以下命令安装依赖:")
+                        self.logger.error(f"   pip install {missing_module}")
+                        
+                        # 检查是否有requirements.txt
+                        requirements_file = code_file.parent / "requirements.txt"
+                        if requirements_file.exists():
+                            self.logger.error(f"   或安装所有依赖:")
+                            self.logger.error(f"   pip install -r {requirements_file}")
+                        self.logger.error(f"{'='*60}\n")
+                
                 return {
                     'success': False,
-                    'error': result.stderr,
+                    'error': error_msg,
                     'output': result.stdout
                 }
             
@@ -554,6 +782,151 @@ class CodeGeneratorAgent(BaseAgent):
                 'success': False,
                 'error': str(e)
             }
+    
+    def _generate_requirements(self, code_file: Path) -> Optional[Path]:
+        """
+        分析生成的代码，生成 requirements.txt 文件
+        
+        Args:
+            code_file: 生成的代码文件路径
+            
+        Returns:
+            requirements.txt 文件路径，如果生成失败则返回 None
+        """
+        try:
+            # 读取代码文件
+            with open(code_file, 'r', encoding='utf-8') as f:
+                code_content = f.read()
+            
+            # 使用LLM分析代码依赖
+            from utils.api_client import get_llm_client
+            
+            llm_client = get_llm_client(
+                api_provider=self.api_provider,
+                model=self.model,
+                temperature=0.3,  # 降低温度以获得更准确的依赖列表
+                max_tokens=1024
+            )
+            
+            prompt = f"""分析以下Python代码，提取所有需要安装的第三方库（不包括标准库）。
+
+代码：
+```python
+{code_content[:5000]}  # 限制长度避免token过多
+```
+
+要求：
+1. 只列出第三方库（不是Python标准库）
+2. 使用标准的包名（例如：numpy, pandas, matplotlib）
+3. 每行一个包名
+4. 如果可能，指定最低版本号（例如：numpy>=1.20.0）
+5. 不要包含任何解释性文字，只输出包名列表
+
+直接输出requirements.txt格式的内容："""
+            
+            self.logger.info("正在分析代码依赖...")
+            response = llm_client.generate(prompt=prompt)
+            
+            # 提取requirements内容
+            requirements_content = self._extract_requirements_from_response(response)
+            
+            if not requirements_content:
+                # 如果LLM分析失败，尝试简单的正则提取
+                requirements_content = self._extract_imports_simple(code_content)
+            
+            if not requirements_content:
+                self.logger.warning("无法提取依赖信息")
+                return None
+            
+            # 保存 requirements.txt
+            requirements_file = code_file.parent / "requirements.txt"
+            with open(requirements_file, 'w', encoding='utf-8') as f:
+                f.write(requirements_content)
+            
+            return requirements_file
+            
+        except Exception as e:
+            self.logger.error(f"生成requirements.txt失败: {str(e)}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            return None
+    
+    def _extract_requirements_from_response(self, response: str) -> str:
+        """
+        从LLM响应中提取requirements内容
+        
+        Args:
+            response: LLM的响应文本
+            
+        Returns:
+            提取的requirements内容
+        """
+        import re
+        
+        # 尝试提取代码块中的内容
+        code_blocks = re.findall(r'```(?:txt|text|requirements)?\n(.*?)```', response, re.DOTALL)
+        if code_blocks:
+            content = code_blocks[0].strip()
+            return content
+        
+        # 如果没有代码块，尝试提取所有非空行（可能是直接的包列表）
+        lines = [line.strip() for line in response.split('\n') if line.strip()]
+        # 过滤掉明显的解释性文字
+        valid_lines = []
+        for line in lines:
+            # 跳过明显的解释性文字
+            if any(skip in line.lower() for skip in ['要求', '注意', '说明', '以下是', '如下', '：', ':', '```']):
+                continue
+            # 如果行看起来像包名（字母、数字、下划线、连字符、点、>=、==）
+            if re.match(r'^[a-zA-Z0-9_\-\.]+(?:[>=<]+[0-9\.]+)?$', line):
+                valid_lines.append(line)
+        
+        if valid_lines:
+            return '\n'.join(valid_lines)
+        
+        return ""
+    
+    def _extract_imports_simple(self, code_content: str) -> str:
+        """
+        使用简单方法从代码中提取import语句（备用方案）
+        
+        Args:
+            code_content: 代码内容
+            
+        Returns:
+            requirements格式的字符串
+        """
+        import re
+        
+        # 标准库列表（不需要安装）
+        stdlib_modules = {
+            'os', 'sys', 'json', 'datetime', 'time', 'random', 'math', 'collections',
+            'itertools', 'functools', 'operator', 'string', 're', 'pathlib', 'io',
+            'csv', 'urllib', 'http', 'email', 'base64', 'hashlib', 'pickle', 'copy',
+            'typing', 'dataclasses', 'enum', 'abc', 'contextlib', 'threading', 'multiprocessing',
+            'subprocess', 'logging', 'warnings', 'traceback', 'inspect', 'pdb'
+        }
+        
+        # 提取所有 import 语句
+        import_pattern = r'^(?:from\s+(\S+)\s+)?import\s+(\S+)'
+        imports = set()
+        
+        for line in code_content.split('\n'):
+            match = re.match(import_pattern, line.strip())
+            if match:
+                module = match.group(1) or match.group(2)
+                if module:
+                    # 提取主包名（例如：numpy -> numpy, matplotlib.pyplot -> matplotlib）
+                    main_package = module.split('.')[0]
+                    if main_package not in stdlib_modules:
+                        imports.add(main_package)
+        
+        if imports:
+            # 按字母顺序排序
+            sorted_imports = sorted(imports)
+            return '\n'.join(sorted_imports)
+        
+        return ""
     
     def _save_result(self, result: Dict):
         """保存生成结果"""

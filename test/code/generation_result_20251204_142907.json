@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "iterations": [
+    {
+      "iteration": 1,
+      "code_file": "data/code/generated_code_20251204_142754.py",
+      "requirements_file": "data/code/requirements.txt",
+      "success": true,
+      "stage": "completed",
+      "output": "实验完成！\n",
+      "metrics_file": "data/code/metrics.json",
+      "figures": [
+        "data/code/figure_DOA_vs_Time.png",
+        "data/code/figure_MSE_vs_Snapshot.png"
+      ]
+    }
+  ],
+  "final_iteration": 1,
+  "iteration": 1,
+  "code_file": "data/code/generated_code_20251204_142754.py",
+  "requirements_file": "data/code/requirements.txt",
+  "stage": "completed",
+  "output": "实验完成！\n",
+  "metrics_file": "data/code/metrics.json",
+  "figures": [
+    "data/code/figure_DOA_vs_Time.png",
+    "data/code/figure_MSE_vs_Snapshot.png"
+  ],
+  "timestamp": "2025-12-04 14:29:07"
+}

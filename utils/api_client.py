@@ -190,10 +190,21 @@ class GptsApiClient:
             raise ValueError("未设置GPTSAPI_KEY，请在config.yaml中配置或设置环境变量")
         
         # 使用OpenAI客户端，只需改变base_url
+        base_url = config.get('base_url', 'https://api.gptsapi.net/v1')
+        # 清理base_url（去除前后空格）
+        base_url = base_url.strip()
+        # 确保base_url以/v1结尾（OpenAI兼容接口）
+        if not base_url.endswith('/v1'):
+            if base_url.endswith('/'):
+                base_url = base_url + 'v1'
+            else:
+                base_url = base_url + '/v1'
+        
         self.client = OpenAI(
             api_key=config['api_key'],
-            base_url=config.get('base_url', 'https://api.gptsapi.net/v1')
+            base_url=base_url
         )
+        self.base_url = base_url  # 保存用于错误信息
         self.model = model or config.get('model', 'gemini-3-pro-preview')
         self.temperature = temperature if temperature is not None else config.get('temperature', 0.7)
         self.max_tokens = max_tokens or config.get('max_tokens', 8192)
@@ -234,7 +245,21 @@ class GptsApiClient:
             return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"GptsApi调用失败: {str(e)}")
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(f"GptsApi调用失败: {error_type}: {error_msg}")
+            logger.error(f"API配置: base_url={self.base_url}, model={self.model}")
+            
+            # 提供更详细的错误信息
+            if "Connection" in error_type or "connection" in error_msg.lower():
+                raise ConnectionError(
+                    f"无法连接到API服务器。\n"
+                    f"请检查：\n"
+                    f"1. base_url是否正确: {self.base_url}\n"
+                    f"2. 网络连接是否正常\n"
+                    f"3. API服务是否可用\n"
+                    f"原始错误: {error_msg}"
+                )
             raise
 
 
