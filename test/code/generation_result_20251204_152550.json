@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "iterations": [
+    {
+      "iteration": 1,
+      "code_file": "data/code/generated_code_20251204_152004.py",
+      "requirements_file": "data/code/requirements.txt",
+      "success": false,
+      "stage": "execution_failed",
+      "error": "标准错误输出 (stderr):\nTraceback (most recent call last):\n  File \"/home/hzy/Tom/Agent_Colab/data/code/generated_code_20251204_152004.py\", line 466, in main\n    parafac_tracker = AdaptiveParafacRLS(M, K, lambda_forget, init_tensor)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/hzy/Tom/Agent_Colab/data/code/generated_code_20251204_152004.py\", line 219, in __init__\n    self.A = U1[:, :K] + 1e-1 * (np.random.randn(M, K) + 1j * np.random.randn(M, K))\n             ~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nValueError: operands could not be broadcast together with shapes (6,6) (6,15) \n\n\n标准输出中的错误信息 (stdout):\n开始仿真：L型阵列动态高自由度DOA估计\n程序运行出错: operands could not be broadcast together with shapes (6,6) (6,15) \n",
+      "error_log": "logs/code_error_20251204_152422.log"
+    },
+    {
+      "iteration": 2,
+      "code_file": "data/code/generated_code_20251204_152422.py",
+      "requirements_file": "data/code/requirements.txt",
+      "success": true,
+      "stage": "completed",
+      "output": "实验完成！\n",
+      "metrics_file": "data/code/metrics.json",
+      "figures": []
+    }
+  ],
+  "final_iteration": 2,
+  "iteration": 2,
+  "code_file": "data/code/generated_code_20251204_152422.py",
+  "requirements_file": "data/code/requirements.txt",
+  "stage": "completed",
+  "output": "实验完成！\n",
+  "metrics_file": "data/code/metrics.json",
+  "figures": [],
+  "timestamp": "2025-12-04 15:25:50"
+}

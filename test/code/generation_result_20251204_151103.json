@@ -1,0 +1,18 @@
+{
+  "success": false,
+  "iterations": [
+    {
+      "iteration": 1,
+      "code_file": "data/code/generated_code_20251204_150913.py",
+      "requirements_file": "data/code/requirements.txt",
+      "success": false,
+      "stage": "execution_failed",
+      "error": "代码执行失败（返回码: 1）\n未捕获到详细的错误信息，请检查代码逻辑",
+      "error_log": "logs/code_error_20251204_151103.log"
+    }
+  ],
+  "final_iteration": 1,
+  "error": "所有迭代都未能成功运行代码",
+  "stage": "max_iterations_reached",
+  "timestamp": "2025-12-04 15:11:03"
+}

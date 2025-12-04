@@ -394,6 +394,22 @@ class IdeaDetailerAgent(BaseAgent):
             self.logger.info("✅ LLM 详细化完成")
             self.logger.info("=" * 80)
             self.logger.info(f"响应长度: {len(result)} 字符")
+            
+            # 检查响应是否被截断
+            is_truncated = self._check_response_truncated(result)
+            if is_truncated:
+                self.logger.warning("=" * 80)
+                self.logger.warning("⚠️  警告：响应可能被截断！")
+                self.logger.warning("=" * 80)
+                self.logger.warning("检测到以下问题：")
+                for issue in is_truncated:
+                    self.logger.warning(f"  - {issue}")
+                self.logger.warning("")
+                self.logger.warning("建议：")
+                self.logger.warning("  1. 增加 config.yaml 中 idea_detailing.max_tokens 的值")
+                self.logger.warning("  2. 或重新运行详细化流程")
+                self.logger.warning("=" * 80)
+            
             self.logger.info(f"响应预览（前500字符）:")
             self.logger.info("-" * 80)
             self.logger.info(result[:500])
@@ -409,3 +425,44 @@ class IdeaDetailerAgent(BaseAgent):
             self.log_error(f"错误信息: {str(e)}")
             self.logger.error("")
             raise
+    
+    def _check_response_truncated(self, response: str) -> List[str]:
+        """
+        检查响应是否被截断
+        
+        Args:
+            response: LLM响应文本
+            
+        Returns:
+            如果被截断，返回问题列表；否则返回空列表
+        """
+        issues = []
+        
+        # 检查未闭合的公式块
+        dollar_count = response.count('$$')
+        if dollar_count % 2 != 0:
+            issues.append("检测到未闭合的公式块（$$ 数量为奇数）")
+        
+        # 检查未闭合的代码块
+        code_block_open = response.count('```')
+        if code_block_open % 2 != 0:
+            issues.append("检测到未闭合的代码块（``` 数量为奇数）")
+        
+        # 检查末尾是否在公式中间
+        if response.rstrip().endswith('$') and not response.rstrip().endswith('$$'):
+            issues.append("响应末尾在公式中间被截断")
+        
+        # 检查末尾是否在代码块中
+        if '```' in response and not response.rstrip().endswith('```'):
+            last_code_block = response.rfind('```')
+            if last_code_block > len(response) - 100:  # 最后100字符内有代码块开始
+                issues.append("响应末尾可能在代码块中被截断")
+        
+        # 检查是否以不完整的句子结尾（简单启发式）
+        if response and not response.rstrip().endswith(('.', '。', '!', '！', '?', '？', ')', '）', ']', '】', '}', '}')):
+            # 检查最后几个字符是否是公式或代码的一部分
+            last_chars = response.rstrip()[-10:]
+            if not any(marker in last_chars for marker in ['$$', '```', '\n\n', '##']):
+                issues.append("响应可能在不完整的句子处被截断")
+        
+        return issues

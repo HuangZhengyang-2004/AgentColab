@@ -194,6 +194,8 @@ class DebugAgent(BaseAgent):
             return 'KeyError'
         elif 'attributeerror' in error_lower:
             return 'AttributeError'
+        elif 'linalgerror' in error_lower or 'incompatible dimensions' in error_lower:
+            return 'LinAlgError'
         elif 'timeout' in error_lower or 'timed out' in error_lower:
             return 'TimeoutError'
         else:
@@ -239,11 +241,20 @@ class DebugAgent(BaseAgent):
         elif error_type == 'SyntaxError':
             return True, 'fix_syntax'
         
-        elif error_type in ['NameError', 'TypeError', 'ValueError', 'IndexError', 'KeyError', 'AttributeError']:
+        elif error_type in ['NameError', 'TypeError', 'ValueError', 'IndexError', 'KeyError', 'AttributeError', 'LinAlgError']:
             return True, 'fix_runtime'
         
         elif error_type == 'TimeoutError':
             return True, 'optimize_timeout'
+        
+        # 对于其他RuntimeError，也尝试自动修复（可能是算法逻辑问题）
+        elif error_type == 'RuntimeError':
+            # 检查错误消息，如果是明显的算法问题，尝试修复
+            error_msg = error_details.get('error_message', '').lower()
+            if any(keyword in error_msg for keyword in ['dimension', 'shape', 'size', 'incompatible', 'mismatch']):
+                return True, 'fix_runtime'
+            # 默认也尝试修复（给LLM一个机会）
+            return True, 'fix_runtime'
         
         else:
             return False, 'manual_intervention'

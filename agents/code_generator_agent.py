@@ -377,10 +377,21 @@ class CodeGeneratorAgent(BaseAgent):
 1. 只输出Python代码，不要有任何解释性文字
 2. 代码必须完整且可直接运行
 3. 包含所有必要的import语句
-4. 使用try-except处理错误
+4. 错误处理要求（重要）：
+   - 如果使用try-except捕获异常，必须打印完整的错误信息：
+     ```python
+     except Exception as e:
+         import traceback
+         print(f"程序运行出错: {e}")
+         traceback.print_exc()
+         sys.exit(1)
+     ```
+   - 不要只调用 sys.exit(1) 而不打印错误信息
+   - 确保错误信息输出到标准输出或标准错误，以便调试
 5. 生成评价指标并保存到metrics.json
 6. 使用matplotlib绘制图表并保存为PNG
 7. 在最后打印"实验完成！"
+8. 如果程序出错，必须打印错误信息并调用 sys.exit(1)
 
 直接输出代码，以```python开始，以```结束。"""
             
@@ -656,14 +667,16 @@ class CodeGeneratorAgent(BaseAgent):
                 
                 # 自动安装依赖到独立的venv环境
                 if self.code_venv_python and self.code_venv_python.exists():
-                    # 检查依赖是否已安装
+                    # 检查依赖是否已安装（使用venv的Python，不是当前环境的Python）
+                    venv_python = str(self.code_venv_python)
                     with open(requirements_file, 'r', encoding='utf-8') as f:
                         requirements = [line.strip() for line in f if line.strip() and not line.startswith('#')]
                     
                     missing_deps = []
                     for req in requirements:
                         pkg_name = req.split('>=')[0].split('==')[0].split('<')[0].split('>')[0].strip()
-                        if not self._check_module_installed(pkg_name, python_exe):
+                        # 使用venv的Python检查，而不是当前环境的Python
+                        if not self._check_module_installed(pkg_name, venv_python):
                             missing_deps.append(pkg_name)
                     
                     if missing_deps:
@@ -693,11 +706,76 @@ class CodeGeneratorAgent(BaseAgent):
             )
             
             # 记录输出
-            self.logger.info(f"代码输出:\n{result.stdout}")
+            if result.stdout:
+                self.logger.info(f"代码输出:\n{result.stdout}")
+            if result.stderr:
+                self.logger.info(f"代码错误输出:\n{result.stderr}")
             
-            if result.returncode != 0:
-                error_msg = result.stderr
-                self.logger.error(f"代码执行失败:\n{error_msg}")
+            # 检查是否成功（不仅检查返回码，还检查输出内容）
+            is_success = result.returncode == 0
+            
+            # 额外检查：如果stdout或stderr中包含明显的错误信息，也视为失败
+            error_indicators = [
+                "程序运行出错",
+                "Error:",
+                "Exception:",
+                "Traceback",
+                "失败",
+                "出错",
+                "error occurred"
+            ]
+            
+            output_text = (result.stdout + result.stderr).lower()
+            for indicator in error_indicators:
+                if indicator.lower() in output_text:
+                    # 检查是否是真正的错误（排除注释或字符串中的错误信息）
+                    # 简单检查：如果错误信息在最后1000个字符中，很可能是运行时错误
+                    if indicator.lower() in output_text[-1000:]:
+                        self.logger.warning(f"⚠️  检测到错误信息: {indicator}")
+                        is_success = False
+                        break
+            
+            if not is_success:
+                # 组合所有错误信息（优先使用stderr，如果没有则使用stdout中的错误信息）
+                error_parts = []
+                
+                # 1. 首先添加stderr（标准错误输出）
+                if result.stderr and result.stderr.strip():
+                    error_parts.append("标准错误输出 (stderr):")
+                    error_parts.append(result.stderr)
+                
+                # 2. 检查stdout中是否有错误信息
+                if result.stdout:
+                    stdout_lower = result.stdout.lower()
+                    has_error_in_stdout = any(
+                        indicator in stdout_lower 
+                        for indicator in ["error", "exception", "traceback", "失败", "出错"]
+                    )
+                    if has_error_in_stdout:
+                        error_parts.append("\n标准输出中的错误信息 (stdout):")
+                        error_parts.append(result.stdout)
+                
+                # 3. 如果都没有，至少提供返回码信息和调试建议
+                if not error_parts:
+                    error_parts.append(f"代码执行失败（返回码: {result.returncode}）")
+                    error_parts.append("")
+                    error_parts.append("⚠️  未捕获到详细的错误信息，可能的原因：")
+                    error_parts.append("  1. 代码中的异常处理没有打印错误信息（只调用了sys.exit(1)）")
+                    error_parts.append("  2. 错误信息被重定向或丢失")
+                    error_parts.append("  3. 程序在导入阶段就失败了")
+                    error_parts.append("")
+                    error_parts.append("💡 建议：")
+                    error_parts.append("  - 检查代码中的异常处理，确保打印完整的错误信息")
+                    error_parts.append("  - 手动运行代码查看详细错误：")
+                    error_parts.append(f"    {python_exe} {abs_code_file}")
+                    error_parts.append("  - 检查代码逻辑和依赖安装")
+                
+                error_msg = "\n".join(error_parts)
+                
+                self.logger.error(f"代码执行失败（返回码: {result.returncode}）:")
+                self.logger.error("=" * 60)
+                self.logger.error(error_msg)
+                self.logger.error("=" * 60)
                 
                 # 检查是否是模块缺失错误
                 if 'ModuleNotFoundError' in error_msg or 'ImportError' in error_msg:
@@ -766,7 +844,12 @@ class CodeGeneratorAgent(BaseAgent):
             with open(error_log, 'w', encoding='utf-8') as f:
                 f.write(f"代码文件: {code_file}\n")
                 f.write(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"\n错误信息:\n{error}\n")
+                f.write(f"\n{'='*60}\n")
+                f.write(f"错误信息:\n")
+                f.write(f"{'='*60}\n")
+                f.write(f"{error}\n")
+                f.write(f"\n{'='*60}\n")
+                f.write(f"提示: 请检查代码逻辑、依赖安装和运行环境\n")
             
             self.logger.info(f"✅ 错误日志已保存: {error_log}")
             

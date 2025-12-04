@@ -1,0 +1,18 @@
+{
+  "success": false,
+  "iterations": [
+    {
+      "iteration": 1,
+      "code_file": "data/code/generated_code_20251204_151538.py",
+      "requirements_file": "data/code/requirements.txt",
+      "success": false,
+      "stage": "execution_failed",
+      "error": "标准错误输出 (stderr):\nTraceback (most recent call last):\n  File \"/home/hzy/Tom/Agent_Colab/data/code/generated_code_20251204_151538.py\", line 332, in main\n    Ahat, Bhat, Chat = parafac_sgd_init(Y_init, R, max_iter=100)\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/hzy/Tom/Agent_Colab/data/code/generated_code_20251204_151538.py\", line 128, in parafac_sgd_init\n    A = np.linalg.lstsq(V.conj().T, Y1.T, rcond=None)[0].T\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/hzy/miniconda3/envs/agentcolab/lib/python3.12/site-packages/numpy/linalg/linalg.py\", line 2297, in lstsq\n    raise LinAlgError('Incompatible dimensions')\nnumpy.linalg.LinAlgError: Incompatible dimensions\n\n\n标准输出中的错误信息 (stdout):\n程序运行出错: Incompatible dimensions\n",
+      "error_log": "logs/code_error_20251204_151740.log"
+    }
+  ],
+  "final_iteration": 1,
+  "error": "所有迭代都未能成功运行代码",
+  "stage": "max_iterations_reached",
+  "timestamp": "2025-12-04 15:17:40"
+}
